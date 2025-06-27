@@ -1,5 +1,4 @@
 #!/usr/bin/env ruby
-# typed: strict
 
 require 'optparse'
 require 'openssl'
@@ -7,7 +6,7 @@ require 'securerandom' # for cert generation
 require 'net/imap' # for SASL/SCRAM auth
 require 'digest' # for MD5 auth
 
-script_name = 'pgpi -- Postgres private investigator' # name must be valid as a certificate CN
+script_name = 'pgpi -- Postgres Private Investigator' # name must be valid as a certificate CN
 options = { # set defaults
   target: nil,
   delete_host_suffix: '.localtest.me',

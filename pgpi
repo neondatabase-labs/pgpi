@@ -1,4 +1,5 @@
 #!/usr/bin/env ruby
+# typed: strict
 
 require 'optparse'
 require 'openssl'
@@ -17,7 +18,7 @@ options = { # set defaults
   send_chunks: 'whole',
   ssl_cert: nil,
   ssl_key: nil,
-  cert_sig: 'ecdsa',
+  cert_sig: 'rsa',
   deny_ssl: false,
   log_certs: false,
   log_proxied: true,
@@ -46,7 +47,7 @@ OptionParser.new do |opts|
           "TLS certificate for connection with client (default: generated, self-signed)") { |v| options[:ssl_cert] = v }
   opts.on("--ssl-key /path/to/key",
           "TLS key for connection with client (default: generated)") { |v| options[:ssl_key] = v }
-  opts.on("--cert-sig ecdsa|rsa", ['rsa', 'ecdsa'],
+  opts.on("--cert-sig rsa|ecdsa", ['rsa', 'ecdsa'],
           "Specify RSA or ECDSA signature for generated certificate (default: #{options[:cert_sig]})") { |v| options[:cert_sig] = v}
   opts.on("--[no-]deny-client-ssl",
           "Tell client that SSL is not supported (default: #{options[:deny_ssl]})") { |v| options[:deny_ssl] = v }
@@ -60,6 +61,16 @@ OptionParser.new do |opts|
           "Where to append server traffic TLS decryption data (default: nowhere)") { |v| options[:server_sslkeylogfile] = v }
   opts.on("--[no-]bw", "Force monochrome output even to TTY (default: #{options[:bw]})") { |v| options[:bw] = v }
 end.parse!
+
+has_SASL = Net::IMAP.const_defined?(:SASL) && Net::IMAP::SASL.const_defined?(:ScramSHA256Authenticator)
+if options[:force_password] && !has_SASL
+  puts "Missing Net::IMAP::SASL::ScramSHA256Authenticator. --override-auth will not support SCRAM. Please upgrade Ruby (requires 3.3+)."
+end
+
+if options[:cert_sig] == 'ecdsa' && !OpenSSL::PKey::EC.new.respond_to?(:public_to_pem)
+  puts "Missing OpenSSL::PKey::EC#public_to_pem. --cert-sig ecdsa is not supported. Please upgrade Ruby."
+  exit 1
+end
 
 # Postgres reads and writes
 
@@ -140,10 +151,10 @@ class PGMessageReader
     [type, msg]
   end
 
-  def available_messages(&)
+  def available_messages(&blk)
     messages = []
     while true do
-      nm = next_message(messages.empty?, &)
+      nm = next_message(messages.empty?, &blk)
       return nil if nm.nil? && messages.empty?
       break unless nm
       messages << nm
@@ -154,28 +165,30 @@ end
 
 # channel binding support
 
-class ScramSHA256Authenticator < Net::IMAP::SASL::ScramSHA256Authenticator
-  def initialize(*args, **options)
-    super(*args, **options)
-    @ssl_cert = options[:ssl_cert]
+if has_SASL
+  class ScramSHA256Authenticator < Net::IMAP::SASL::ScramSHA256Authenticator
+    def initialize(*args, **options)
+      super(*args, **options)
+      @ssl_cert = options[:ssl_cert]
+    end
+
+    def gs2_cb_flag
+      @ssl_cert.nil? ? "n" : "y" # y => we would have supported -PLUS if server had offered it
+    end
   end
 
-  def gs2_cb_flag
-    @ssl_cert.nil? ? "n" : "y" # y => we would have supported -PLUS if server had offered it
-  end
-end
+  class ScramSHA256PlusAuthenticator < ScramSHA256Authenticator
+    def gs2_cb_flag
+      "p=tls-server-end-point"
+    end
 
-class ScramSHA256PlusAuthenticator < ScramSHA256Authenticator
-  def gs2_cb_flag
-    "p=tls-server-end-point"
-  end
-
-  def cbind_input
-    cert_algo_raw = @ssl_cert.signature_algorithm
-    cert_algo = OpenSSL::Digest.new(cert_algo_raw).name # standardize e.g. sha256WithRSAEncryption to SHA256
-    sasl_algo = cert_algo == "MD5" || cert_algo == "SHA1" ? "SHA256" : cert_algo
-    hash = OpenSSL::Digest.digest(sasl_algo, @ssl_cert.to_der)
-    "#{gs2_header}#{hash}"
+    def cbind_input
+      cert_algo_raw = @ssl_cert.signature_algorithm
+      cert_algo = OpenSSL::Digest.new(cert_algo_raw).name # standardize e.g. sha256WithRSAEncryption to SHA256
+      sasl_algo = cert_algo == "MD5" || cert_algo == "SHA1" ? "SHA256" : cert_algo
+      hash = OpenSSL::Digest.digest(sasl_algo, @ssl_cert.to_der)
+      "#{gs2_header}#{hash}"
+    end
   end
 end
 
@@ -415,6 +428,10 @@ while true
           puts "^^ sent MD5 digest to server: md5(md5(#{pwd.inspect} + #{username.inspect}) + #{salt.inspect})"
 
         elsif auth_msg.start_with?(a8("\x00\x00\x00\x0a")) # SASL auth request from server
+          unless has_SASL
+            puts "SCRAM auth was requested by server but is not supported on this version of Ruby: exiting"
+            exit 1
+          end
           authenticators = { # highest preference first
             'SCRAM-SHA-256-PLUS' => ScramSHA256PlusAuthenticator,
             'SCRAM-SHA-256' => ScramSHA256Authenticator,

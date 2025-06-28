@@ -61,14 +61,251 @@ OptionParser.new do |opts|
   opts.on("--[no-]bw", "Force monochrome output even to TTY (default: #{options[:bw]})") { |v| options[:bw] = v }
 end.parse!
 
+# Ruby stdlib compatibility checks
+
 has_SASL = Net::IMAP.const_defined?(:SASL) && Net::IMAP::SASL.const_defined?(:ScramSHA256Authenticator)
 if options[:force_password] && !has_SASL
-  puts "Missing Net::IMAP::SASL::ScramSHA256Authenticator. --override-auth will not support SCRAM. Please upgrade Ruby (requires 3.3+)."
+  puts "Missing Net::IMAP::SASL::ScramSHA256Authenticator, so --override-auth will not support SCRAM. Please use Ruby 3.3 or higher."
+  # exit later if SCRAM is requested by server
 end
 
-if options[:cert_sig] == 'ecdsa' && !OpenSSL::PKey::EC.new.respond_to?(:public_to_pem)
-  puts "Missing OpenSSL::PKey::EC#public_to_pem. --cert-sig ecdsa is not supported. Please upgrade Ruby."
+if options[:cert_sig] == 'ecdsa' && !OpenSSL::PKey::EC.method_defined?(:public_to_pem)
+  puts "Missing OpenSSL::PKey::EC#public_to_pem, so --cert-sig ecdsa is not supported. Please use Ruby 3.1 or higher."
   exit 1
+end
+
+# misc utils
+
+class ClientEOFException < StandardError; end
+class ServerEOFException < StandardError; end
+
+def a8(str) str.force_encoding('ASCII-8BIT') end
+def t_now() Process.clock_gettime(Process::CLOCK_MONOTONIC) end
+def tls_summary(sock) "#{sock.ssl_version}/#{sock.cipher.first}" end
+
+$colourful = STDOUT.tty? && !options[:bw]
+def puts_color(color, s1, s2) puts "#{$colourful ? "\033[#{color}m" : ''}#{s1}#{$colourful ? "\033[0m" : ''}#{s2}" end
+def server_to_client(str) puts_color('38;5;45', 'server -> client: ', str) end
+def server_to_script(str) puts_color('38;5;45', 'server -> script: ', str) end
+def script_to_client(str) puts_color('38;5;45', 'script -> client: ', str) end
+def client_to_server(str) puts_color('38;5;220', 'client -> server: ', str) end
+def client_to_script(str) puts_color('38;5;220', 'client -> script: ', str) end
+def script_to_server(str) puts_color('38;5;220', 'script -> server: ', str) end
+
+ssl_request = a8("\x00\x00\x00\b\x04\xD2\x16/")
+
+# Postgres message parsing
+
+=begin
+server_msgs = {
+  "T": "RowDescription",
+  "V": "FunctionCallResponse",
+  "W": "CopyBothResponse",
+  "Z": "ReadyForQuery",
+  "c": "CopyDone",
+  "d": "CopyData",
+  "n": "NoData",
+  "s": "PortalSuspended",
+  "t": "ParameterDescription",
+  "v": "NegotiateProtocolVersion",
+  "R": ["Authentication", lambda do |m|
+    auth_msg = m.unpack1('N')
+    [[auth_msg, {
+      0 => "AuthenticationOk",
+      2 => "AuthenticationKerberosV5",
+      3 => "AuthenticationCleartextPassword",
+      5 => "AuthenticationMD5Password",
+      7 => "AuthenticationGSS",
+      8 => "AuthenticationGSSContinue",
+      9 => "AuthenticationSSPI",
+      10 => "AuthenticationSASL",
+      11 => "AuthenticationSASLContinue",
+      12 => "AuthenticationSASLFinal",
+    }[auth_msg]]]
+  end],
+    "\x00\x00\x00\x00": "AuthenticationOk",
+    "\x00\x00\x00\x02": "AuthenticationKerberosV5",
+    "\x00\x00\x00\x03": "AuthenticationCleartextPassword",
+    "\x00\x00\x00\x05": "AuthenticationMD5Password",
+    "\x00\x00\x00\x07": "AuthenticationGSS",
+    "\x00\x00\x00\x08": "AuthenticationGSSContinue",
+    "\x00\x00\x00\x09": "AuthenticationSSPI",
+    "\x00\x00\x00\x0a": "AuthenticationSASL",
+    "\x00\x00\x00\x0b": "AuthenticationSASLContinue",
+    "\x00\x00\x00\x0c": "AuthenticationSASLFinal",
+  },
+}
+
+client_msgs = {
+  "B": "Bind",
+  "C": "Close",
+  "D": "Describe",
+  "E": "Execute",
+  "F": "FunctionCall",
+  "H": "Flush",
+  "P": "Parse",
+  "Q": "Query",
+  "S": "Sync",
+  "X": "Terminate",
+  "c": "CopyDone",
+  "d": "CopyData",
+  "f": "CopyFail",
+  "p": "PasswordMessage/SASLInitialResponse/SASLResponse/GSSResponse"
+}
+=end
+
+$null_char = a8("\x00")
+
+class PgMsg
+  def initialize(msg, from_server)
+    @msg = msg
+    @from_server = from_server
+  end
+
+  def char
+    value = @msg.slice!(0)
+    repr = value.inspect
+    [value, repr]
+  end
+
+  def int32
+    bytes = @msg.slice!(0...4)
+    value = bytes.unpack1('N')
+    repr = '"' + (bytes.unpack1('H*').scan(/../).map { |x| "\\x#{x}" }.join()) + '"'
+    [value, repr]
+  end
+
+  def int16
+    bytes = @msg.slice!(0...2)
+    value = bytes.unpack1('n')
+    repr = '"' + (bytes.unpack1('H*').scan(/../).map { |x| "\\x#{x}" }.join()) + '"'
+    [value, repr]
+  end
+
+  def int8
+    byte = @msg.slice!(0)
+    value = byte.unpack1('C')
+    repr = "\"\\x#{byte.unpack1('H')}\""
+    [value, repr]
+  end
+
+  def cstr
+    value = @msg.unpack1('Z*')
+    repr = @msg.slice!(0..value.length).inspect # inclusive range takes in the null terminator
+    [value, repr]
+  end
+
+  def fmt(*args)
+    args.each_slice(2).map { |repr, annot| "  #{repr} \033[38;5;244m#{annot}\033[0m" }.join() + "\n"
+  end
+
+  def inspect
+    s = ''
+    type_value, type_repr = char
+    len_value, len_repr = int32
+    type_name = if @from_server
+      case type_value
+      when "1"; "ParseComplete"
+      when "2"; "BindComplete"
+      when "3"; "CloseComplete"
+      when "A"
+        v, r = int32
+        s += fmt(r, "process ID #{v}")
+        v, r = cstr
+        s += fmt(r, "channel name")
+        v, r = cstr
+        s += fmt(r, "payload")
+        v, r = cstr
+        s += fmt(r, "end")
+        "NotificationResponse"
+      when "C"
+        # v, r = char
+        # s += fmt(r, v == "S" ? "prepared statement" : v == "P" ? "portal" : "unknown")
+        v, r = cstr
+        s += fmt(r, "command tag")
+        "CommandComplete"
+      when "D"
+        col_count, r = int16
+        s += fmt(r, "#{col_count} columns follow")
+        col_count.times do
+          v, r = int32
+          if v == 0xffffffff
+            s += fmt(r, "column value: null")
+          else
+            s += fmt(r, "#{v} bytes", @msg.slice!(0...v).inspect, "column value")
+          end
+        end
+        "DataRow"
+      when "E"
+        loop do
+          v, r = char
+          if v == $null_char
+            s += fmt(r, "end")
+            break
+          end
+          err_field = {
+            S: "severity",
+            V: "severity, unlocalized",
+            C: "SQLSTATE code",
+            M: "message",
+            D: "detail",
+            H: "hint",
+            P: "position",
+            p: "internal position",
+            q: "internal query",
+            W: "where",
+            s: "schema",
+            t: "table",
+            c: "column",
+            d: "data type",
+            n: "constraint",
+            F: "file",
+            L: "line",
+            R: "routine"
+          }[v.to_sym]
+          _, field_repr = cstr
+          s += fmt(r, "#{err_field}", field_repr, "value")
+        end
+        "ErrorResponse"
+      when "G", "H"
+        v, r = int8
+        s += fmt(r, "copy format: #{v == 0 ? "text" : v == 1 ? "binary" : "unknown"}")
+        col_count, r = int16
+        s += fmt(r, "#{col_count} columns follow")
+        col_count.times do
+          v, r = int16
+          s += fmt(r, "copy format: #{v == 0 ? "text" : v == 1 ? "binary" : "unknown"}")
+        end
+        type_value == "G" ? "CopyInResponse" : "CopyOutResponse"
+      when "I"
+        "EmptyQueryResponse"
+      when "K"
+        v, r = int32
+        s += fmt(r, "process ID: #{v}")
+        v, r = int32
+        s += fmt(r, "secret key: #{v}")
+        "BackendKeyData"
+      when "N"
+        "NoticeResponse"
+      when "S"
+        kv, kr = cstr
+        vv, vr = cstr
+        s += fmt(kr, "key", vr, "value")
+        "ParameterStatus"
+      when "Z"
+        v, r = char
+        status = { I: "idle", T: "in transaction block", E: "in failed transaction block" }[v.to_sym]
+        s += fmt(r, status)
+        "ReadyForQuery"
+      
+      else
+        s += fmt(@msg.inspect, "unknown message")
+      end
+    else
+      s += fmt(@msg.inspect, "unknown message")
+    end
+    fmt(type_repr, type_name, len_repr, "#{len_value} bytes") + s
+  end
 end
 
 # Postgres reads and writes
@@ -143,7 +380,9 @@ class PGMessageReader
     result = buffer_to(5, blocking) or return result
     type = @buffer[0]
     length_incl = @buffer[1...5].unpack1('N')
-    result = buffer_to(1 + length_incl, blocking) or return result # not 5 + len, because len is inclusive
+    result = buffer_to(1 + length_incl, blocking) or return result # 1 + not 5 +, because len is inclusive
+    xmsg = PgMsg.new(@buffer[0..length_incl], true)
+    puts xmsg.inspect
     @buffer.slice!(0...5) # discard type and length
     msg = @buffer.slice!(0...length_incl - 4)
     yield "#{type} #{length_incl} #{msg.inspect}" if block_given?
@@ -210,26 +449,6 @@ def make_key_and_cert(subject, sig)
   cert.sign(key, 'SHA256')
   [key, cert]
 end
-
-# misc utils
-
-class ClientEOFException < StandardError; end
-class ServerEOFException < StandardError; end
-
-def a8(str) str.force_encoding('ASCII-8BIT') end
-def t_now() Process.clock_gettime(Process::CLOCK_MONOTONIC) end
-def tls_summary(sock) "#{sock.ssl_version}/#{sock.cipher.first}" end
-
-$colourful = STDOUT.tty? && !options[:bw]
-def puts_color(color, s1, s2) puts "#{$colourful ? "\033[#{color}m" : ''}#{s1}#{$colourful ? "\033[0m" : ''}#{s2}" end
-def server_to_client(str) puts_color('38;5;45', 'server -> client: ', str) end
-def server_to_script(str) puts_color('38;5;45', 'server -> script: ', str) end
-def script_to_client(str) puts_color('38;5;45', 'script -> client: ', str) end
-def client_to_server(str) puts_color('38;5;220', 'client -> server: ', str) end
-def client_to_script(str) puts_color('38;5;220', 'client -> script: ', str) end
-def script_to_server(str) puts_color('38;5;220', 'script -> server: ', str) end
-
-ssl_request = a8("\x00\x00\x00\b\x04\xD2\x16/")
 
 # main loop
 

@@ -13,8 +13,8 @@ pgpi sits between the two parties in a Postgres-protocol exchange, forwarding (a
 macOS
 
 ```bash
-brew install mise
-mise exec ruby@3.4 -- ./pgpi --help
+> brew install neondatabase-labs/tools/pgpi
+> pgpi --help
 ```
 
 ### Example usage with Neon

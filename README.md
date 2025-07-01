@@ -2,36 +2,44 @@
 
 # pgpi: Postgres Private Investigator
 
-pgpi is like Wireshark for Postgres. It's designed to help monitor, understand and troubleshoot network traffic between a Postgres client and server, proxy or pooler.
+pgpi is like Wireshark for Postgres. It's designed to help monitor, understand and troubleshoot network traffic between Postgres clients, servers, proxies and poolers.
 
 > _So why not just use Wireshark?_ Read on: using Wireshark is one of the things pgpi can help with.
 
 pgpi sits between the two parties in a Postgres-protocol exchange, forwarding (and perhaps decrypting and re-encrypting) messages while also parsing and logging them. Its other features are designed around that goal.
 
-> _So it's a tool for mounting MITM attacks?_ Only in the same way that a kitchen knife is "a tool for stabbing people". Securing your Postgres connection from MITM attacks is discussed further below.
+> _So it's a tool for mounting MITM attacks?_ Only in the same way that a kitchen knife is "a tool for stabbing people". Securing your Postgres connection from MITM attacks is discussed below.
 
 ### Get started
 
-macOS
+#### macOS
 
 ```bash
-> brew install neondatabase-labs/tools/pgpi
-> pgpi --help
+$ brew install neondatabase-labs/tools/pgpi
+$ pgpi --help
 ```
 
-### Example usage with Neon
+### Example usage
 
 ```bash
-> pgpi --override-auth
+$ pgpi --override-auth
 listening ...
 ```
 
-In another terminal, connect to a Neon Postgres URL (adding `.localtest.me` to the host name and removing `&channel_binding=require` from the parameters):
+In another terminal, connect to a Neon Postgres URL, but append `.localtest.me` to the host name and delete `&channel_binding=require` from the parameters:
 
 ```bash
-> psql `postgresql://blah`
-psql 'postgresql://neondb_owner:password@ep-old-cell-a234ce68-pooler.eu-central-1.aws.neon.tech.localtest.me/otherdb?sslmode=require'
+$ psql 'postgresql://user:password@ep-abcxyz.us-east-1.aws.neon.tech.localtest.me/mydb?sslmode=require'
 ```
+
+Back in the first terminal:
+
+```bash
+$ pgpi --override-auth
+listening ...
+
+```
+
 
 
 ## Postgres connection security

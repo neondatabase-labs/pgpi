@@ -6,7 +6,9 @@ require 'securerandom' # for cert generation
 require 'net/imap' # for SASL/SCRAM auth
 require 'digest' # for MD5 auth
 
-script_name = 'pgpi -- Postgres Private Investigator' # name must be valid as a certificate CN
+script_name = 'pgpi -- Postgres Private Investigator' # note: name must be valid as a certificate CN
+script_info = 'https://github.com/neondatabase-labs/pgpi  Copyright 2025 Databricks, Inc.  License: Apache 2.0'
+
 options = { # set defaults
   target: nil,
   delete_host_suffix: '.localtest.me',
@@ -27,7 +29,7 @@ options = { # set defaults
 }
 
 OptionParser.new do |opts|
-  opts.banner = "#{script_name}\nUsage: pgpi [options]"
+  opts.banner = "#{script_name}\n#{script_info}\n\nUsage: pgpi [options]"
   opts.on("--fixed-host a.bc.de",
           "Use a fixed Postgres server hostname (default: via SNI, or 'localhost')") { |v| options[:target] = v }
   opts.on("--delete-host-suffix bc.de",
@@ -83,16 +85,22 @@ def a8(str) str.force_encoding('ASCII-8BIT') end
 def t_now() Process.clock_gettime(Process::CLOCK_MONOTONIC) end
 def tls_summary(sock) "#{sock.ssl_version}/#{sock.cipher.first}" end
 
-$colourful = STDOUT.tty? && !options[:bw]
-def puts_color(color, s1, s2) puts "#{$colourful ? "\033[#{color}m" : ''}#{s1}#{$colourful ? "\033[0m" : ''}#{s2}" end
-def server_to_client(str) puts_color('38;5;45', 'server -> client: ', str) end
-def server_to_script(str) puts_color('38;5;45', 'server -> script: ', str) end
-def script_to_client(str) puts_color('38;5;45', 'script -> client: ', str) end
-def client_to_server(str) puts_color('38;5;220', 'client -> server: ', str) end
-def client_to_script(str) puts_color('38;5;220', 'client -> script: ', str) end
-def script_to_server(str) puts_color('38;5;220', 'script -> server: ', str) end
+# colour
 
-ssl_request = a8("\x00\x00\x00\b\x04\xD2\x16/")
+$colourful = STDOUT.tty? && !options[:bw]
+$colour_s2c = '38;5;45'
+$colour_c2s = '38;5;220'
+$colour_annot = '38;5;243'
+
+def colourize(colour, s) "#{$colourful ? "\033[#{colour}m" : ''}#{s}#{$colourful ? "\033[0m" : ''}" end
+def puts_colour(colour, s1, s2) puts "#{colourize(colour, s1)}#{s2}" end
+
+def server_to_client(str) puts_colour($colour_s2c, 'server -> client:', str) end
+def server_to_script(str) puts_colour($colour_s2c, 'server -> script:', str) end
+def script_to_client(str) puts_colour($colour_s2c, 'script -> client:', str) end
+def client_to_server(str) puts_colour($colour_c2s, 'client -> server:', str) end
+def client_to_script(str) puts_colour($colour_c2s, 'client -> script:', str) end
+def script_to_server(str) puts_colour($colour_c2s, 'script -> server:', str) end
 
 # Postgres message parsing
 
@@ -103,6 +111,8 @@ class PgMsg
     @msg = msg
     @from_server = from_server
   end
+
+  # ways to read and consume from @msg
 
   def char
     value = @msg.slice!(0)
@@ -137,7 +147,9 @@ class PgMsg
     [value, repr]
   end
 
-  def hexinspect(bytes)
+  # utils
+
+  def hexinspect(bytes) # like inspect but always uses \xXX hex escapes
     '"' + bytes.unpack1('H*').scan(/../).map { |x| "\\x#{x}" }.join() + '"'
   end
 
@@ -146,8 +158,10 @@ class PgMsg
   end
 
   def fmt(*args)
-    args.each_slice(2).map { |repr, annot| "  #{repr} \033[38;5;244m#{annot}\033[0m" }.join() + "\n"
+    args.each_slice(2).map { |repr, annot| " #{repr} #{colourize($colour_annot, '= ' + annot)}" }.join()
   end
+
+  # parsing + output
 
   def inspect
     s = ''
@@ -161,12 +175,8 @@ class PgMsg
       when "3"; "CloseComplete"
         
       when "A"
-        v, r = int32
-        s += fmt(r, "process ID #{v}")
-        v, r = cstr
-        s += fmt(r, "channel name")
-        v, r = cstr
-        s += fmt(r, "payload")
+        _, pidr, _, cnr, _, pr = int32 + cstr + cstr
+        s += fmt(pidr, "process ID", cnr, "channel name", pr, "payload")
         "NotificationResponse"
 
       when "C"
@@ -178,17 +188,16 @@ class PgMsg
         col_count, r = int16
         s += fmt(r, "#{col_count} columns follow")
         col_count.times do
+          s += "\n"
           v, r = int32
-          if v == -1
-            s += fmt(r, "column value: null")
-          else
-            s += fmt(r, "#{v} bytes", @msg.slice!(0...v).inspect, "column value")
-          end
+          s += fmt(r, "null column value") if v == -1
+          s += fmt(r, "#{v} bytes", @msg.slice!(0...v).inspect, "column value") if v != -1
         end
         "DataRow"
 
       when "E"
         loop do
+          s += "\n"
           v, r = char
           if v == $null_char
             s += fmt(r, "end")
@@ -214,68 +223,57 @@ class PgMsg
             L: "line",
             R: "routine"
           }[v.to_sym]
-          _, field_repr = cstr
-          s += fmt(r, "#{err_field}", field_repr, "value")
+          _, fieldr = cstr
+          s += fmt(r, "#{err_field}", fieldr, "value")
         end
         "ErrorResponse"
 
       when "G", "H", "W"
-        v, r = int8
-        s += fmt(r, "copy format: #{formatdesc(v)}")
-        col_count, r = int16
-        s += fmt(r, "#{col_count} columns follow")
+        fv, fr, col_count, colr = int8 + int16
+        s += fmt(fr, "copy format: #{formatdesc(fv)}", colr, "#{col_count} column formats follow")
         col_count.times do
           v, r = int16
-          s += fmt(r, "copy format: #{formatdesc(v)}")
+          s += fmt(r, "column format: #{formatdesc(v)}")
         end
         { G: "CopyInResponse", H: "CopyOutResponse", W: "CopyBothResponse" }[type_value.to_sym]
 
       when "I"; "EmptyQueryResponse"
 
       when "K"
-        pidv, pidr = int32
-        skv, skr = int32 
-        s += fmt(pidr, "process ID: #{pidv}", skr, "secret key: #{skv}")
+        _, pidr, _, skr = int32 + int32
+        s += fmt(pidr, "process ID", skr, "secret key")
         "BackendKeyData"
 
       when "N"; "NoticeResponse"
 
       when "R"
-        auth_type, r = int32
-        s += fmt(r, "auth subtype #{auth_type} (name reported above)")
-        auth_name = case auth_type
+        authtypev, authtyper = int32
+        auth_msg_name = case authtypev
           when 0; "AuthenticationOk"
           when 2; "AuthenticationKerberosV5"
           when 3; "AuthenticationCleartextPassword"
-
           when 5
             bytes = @msg.slice!(0...4)
             s += fmt(hexinspect(bytes), "MD5 salt")
             "AuthenticationMD5Password"
-
           when 7; "AuthenticationGSS"
           when 8; "AuthenticationGSSContinue"
           when 9; "AuthenticationSSPI"
-          
           when 10
-            loop do
+            begin
+              s += "\n"
               v, r = cstr
-              if (v == '')
-                s += fmt(r, "end")
-                break
-              else
-                s += fmt(r, "SASL mechanism")
-              end
-            end
+              s += fmt(r, v == '' ? "end" : "SASL mechanism")
+            end while v != ''
             "AuthenticationSASL"
-
           when 11; "AuthenticationSASLContinue"
           when 12; "AuthenticationSASLFinal"
         end
-        auth_name
+        s = fmt(authtyper, auth_msg_name) + s
+        "Authentication"
 
       when "S"
-        kv, kr, vv, vr = cstr + cstr
+        _, kr, _, vr = cstr + cstr
         s += fmt(kr, "key", vr, "value")
         "ParameterStatus"
 
@@ -283,12 +281,10 @@ class PgMsg
         col_count, r = int16
         s += fmt(r, "#{col_count} columns follow")
         col_count.times do
+          s += "\n"
           _, namer = cstr
-          taboidv, taboidr = int32
-          tabattrnumv, tabattrnumr = int16
-          typoidv, typoidr = int32
-          typlenv, typlenr = int16
-          typmodv, typmodr = int32
+          taboidv, taboidr, tabattrnumv, tabattrnumr = int32 + int16
+          typoidv, typoidr, typlenv, typlenr, typmodv, typmodr = int32 + int16 + int32
           formatv, formatr = int16
           s += fmt(
             namer, "column name",
@@ -305,7 +301,7 @@ class PgMsg
       when "V" # TODO: test this somehow
         v, r = int32
         if v == -1
-          s += fmt(r, "value: null")
+          s += fmt(r, "null value")
         else
           s += fmt(r, "#{v} bytes follow")
           bytes = @msg.slice!(0...v)
@@ -315,7 +311,7 @@ class PgMsg
 
       when "Z"
         v, r = char
-        status = { I: "idle", T: "in transaction block", E: "in failed transaction block" }[v.to_sym]
+        status = { I: "idle", T: "in transaction block", E: "in failed transaction block" }[v.to_sym] || "unknown status"
         s += fmt(r, status)
         "ReadyForQuery"
 
@@ -350,8 +346,7 @@ class PgMsg
     else
       case type_value # client messages
       when "B"
-        _, portalr = cstr
-        _, statementr = cstr
+        _, portalr, _, statementr = cstr + cstr
         s += fmt(portalr, "destination portal", statementr, "source prepared statement")
         code_count, r = int16
         s += fmt(r, "#{code_count} parameter format codes follow")
@@ -380,17 +375,14 @@ class PgMsg
         "Bind"
 
       when "C", "D"
-        thingtypev, thingtyper = char
+        thingtypev, thingtyper, _, thingnamer = char + cstr
         thingtype = thingtypev == "S" ? "prepared statement" : thingtypev == "P" ? "portal" : "unknown"
-        _, thingnamer = cstr
         s += fmt(thingtyper, thingtype, thingnamer, "name of #{thingtype}")
         { C: "Close", D: "Describe" }[type_value.to_sym]
 
       when "E"
-        _, r = cstr
-        s += fmt(r, "portal name")
-        v, r = int32
-        s += fmt(r, "max rows: #{v}" + (v == 0 ? " = no limit" : ""))
+        _, pnr, maxv, maxr = cstr + int32
+        s += fmt(pnr, "portal name", maxr, "max rows: #{maxv}" + (maxv == 0 ? " = no limit" : ""))
         "Execute"
 
       when "F"
@@ -416,10 +408,8 @@ class PgMsg
       when "H"; "Flush"
 
       when "P"
-        v, r = cstr
-        s += fmt(r, "destination prepared statement")
-        v, r = cstr
-        s += fmt(r, "SQL query")
+        _, dr, _, qr = cstr + cstr
+        s += fmt(dr, "destination prepared statement", qr, "SQL query")
         pdt_count, r = int16
         s += fmt(r, "#{pdt_count} parameter data types follow")
         pdt_count.times do
@@ -430,7 +420,7 @@ class PgMsg
 
       when "Q"
         v, r = cstr
-        s += fmt(r, "SQL query")
+        s += fmt(r, "query")
         "Query"
 
       when "S"; "Sync"
@@ -460,12 +450,7 @@ $send_chunks = options[:send_chunks]
 
 def pg_send(sock, *types_and_msgs)
   buffer = a8('')
-  bytes_sent = writes = 0
-
-  write = lambda do |x|
-    sock.write(x)
-    writes += 1
-  end
+  bytes_sent = 0
 
   types_and_msgs.each_slice(2) do |type, msg|
     length_incl = msg.length + 4
@@ -475,14 +460,14 @@ def pg_send(sock, *types_and_msgs)
     bytes_sent += bytes.length
 
     case $send_chunks
-    when 'byte'; bytes.each_char { |char| write.call(char) }
-    when 'message'; write.call(bytes)
+    when 'byte'; bytes.each_char { |char| sock.write(char) }
+    when 'message'; sock.write(bytes)
     else; buffer += bytes
     end
   end
 
-  write.call(buffer) if $send_chunks == 'whole'
-  [bytes_sent, writes]
+  sock.write(buffer) if $send_chunks == 'whole'
+  bytes_sent
 end
 
 class PGMessageReader
@@ -528,11 +513,9 @@ class PGMessageReader
     type = @buffer[0]
     length_incl = @buffer[1...5].unpack1('N')
     result = buffer_to(1 + length_incl, blocking) or return result # 1 + not 5 +, because len is inclusive
-    xmsg = PgMsg.new(@buffer[0..length_incl], @from_server)
-    puts xmsg.inspect
+    yield PgMsg.new(@buffer[0..length_incl], @from_server).inspect if block_given?
     @buffer.slice!(0...5) # discard type and length
     msg = @buffer.slice!(0...length_incl - 4)
-    yield "#{type} #{length_incl} #{msg.inspect}" if block_given?
     [type, msg]
   end
 
@@ -558,7 +541,7 @@ if has_SASL
     end
 
     def gs2_cb_flag
-      @ssl_cert.nil? ? "n" : "y" # y => we would have supported -PLUS if server had offered it
+      @ssl_cert.nil? ? "n" : "y" # y => would have supported -PLUS if server had offered it
     end
   end
 
@@ -569,7 +552,7 @@ if has_SASL
 
     def cbind_input
       cert_algo_raw = @ssl_cert.signature_algorithm
-      cert_algo = OpenSSL::Digest.new(cert_algo_raw).name # standardize e.g. sha256WithRSAEncryption to SHA256
+      cert_algo = OpenSSL::Digest.new(cert_algo_raw).name # standardize e.g. sha256WithRSAEncryption -> SHA256
       sasl_algo = cert_algo == "MD5" || cert_algo == "SHA1" ? "SHA256" : cert_algo
       hash = OpenSSL::Digest.digest(sasl_algo, @ssl_cert.to_der)
       "#{gs2_header}#{hash}"
@@ -598,6 +581,8 @@ def make_key_and_cert(subject, sig)
 end
 
 # main loop
+
+ssl_request = a8("\x00\x00\x00\b\x04\xD2\x16/")
 
 while true
   begin
@@ -843,8 +828,8 @@ while true
       while true do
         messages = server_reader.available_messages { |str| server_to_client(str) if options[:log_proxied] }
         raise ServerEOFException.new if messages.nil?
-        bytes_sent, writes = pg_send(client_sock, *messages.flatten)
-        puts "^^ #{bytes_sent} bytes forwarded to client in #{writes == 1 ? 'one write' : "#{writes} writes"} at +#{(t_now - t0).floor(2)}s, #{server_reader.buffer.length} bytes left in buffer"
+        bytes_sent = pg_send(client_sock, *messages.flatten)
+        puts "^^ #{bytes_sent} bytes forwarded to client at +#{(t_now - t0).floor(2)}s, #{server_reader.buffer.length} bytes left in buffer"
       end
     end
     thread.abort_on_exception = true
@@ -853,8 +838,8 @@ while true
     while true do
       messages = client_reader.available_messages { |str| client_to_server(str) if options[:log_proxied] }
       raise ClientEOFException.new if messages.nil?
-      bytes_sent, writes = pg_send(server_sock, *messages.flatten)
-      puts "^^ #{bytes_sent} bytes forwarded to server in #{writes == 1 ? 'one write' : "#{writes} writes"} at +#{(t_now - t0).floor(2)}s, #{client_reader.buffer.length} bytes left in buffer"
+      bytes_sent = pg_send(server_sock, *messages.flatten)
+      puts "^^ #{bytes_sent} bytes forwarded to server at +#{(t_now - t0).floor(2)}s, #{client_reader.buffer.length} bytes left in buffer"
     end
 
   rescue ServerEOFException
@@ -865,6 +850,7 @@ while true
 
   ensure
     puts "connection end", ''
+    client_sock.close unless client_sock.nil?
     server.close unless server.nil?
     thread.kill unless thread.nil?
   end

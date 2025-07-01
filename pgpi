@@ -42,7 +42,7 @@ OptionParser.new do |opts|
           "SSL negotiation style: mimic client, direct (supported by Postgres 17+) or traditional Postgres (default: #{options[:ssl_negotiation]})") { |v| options[:ssl_negotiation] = v }
   opts.on("--[no-]override-auth",
           "Require password auth from client, do SASL/MD5/password auth with server (default: #{options[:force_password]})") { |v| options[:force_password] = v }
-  opts.on("--send-chunking whole|message|byte", ['whole', 'message', 'byte'],
+  opts.on("--send-chunking whole|byte", ['whole', 'byte'],
           "Chunk size for sending Postgres data (default: #{options[:send_chunks]})") { |v| options[:send_chunks] = v }
   opts.on("--ssl-cert /path/to/cert",
           "TLS certificate for connection with client (default: generated, self-signed)") { |v| options[:ssl_cert] = v }
@@ -95,12 +95,12 @@ $colour_annot = '38;5;243'
 def colourize(colour, s) "#{$colourful ? "\033[#{colour}m" : ''}#{s}#{$colourful ? "\033[0m" : ''}" end
 def puts_colour(colour, s1, s2) puts "#{colourize(colour, s1)}#{s2}" end
 
-def server_to_client(str) puts_colour($colour_s2c, 'server -> client:', str) end
-def server_to_script(str) puts_colour($colour_s2c, 'server -> script:', str) end
-def script_to_client(str) puts_colour($colour_s2c, 'script -> client:', str) end
-def client_to_server(str) puts_colour($colour_c2s, 'client -> server:', str) end
-def client_to_script(str) puts_colour($colour_c2s, 'client -> script:', str) end
-def script_to_server(str) puts_colour($colour_c2s, 'script -> server:', str) end
+def server_to_client(str) puts_colour($colour_s2c, 'server -> client: ', str.strip) end
+def server_to_script(str) puts_colour($colour_s2c, 'server -> script: ', str.strip) end
+def script_to_client(str) puts_colour($colour_s2c, 'script -> client: ', str.strip) end
+def client_to_server(str) puts_colour($colour_c2s, 'client -> server: ', str.strip) end
+def client_to_script(str) puts_colour($colour_c2s, 'client -> script: ', str.strip) end
+def script_to_server(str) puts_colour($colour_c2s, 'script -> server: ', str.strip) end
 
 # Postgres message parsing
 
@@ -108,7 +108,7 @@ $null_char = a8("\x00")
 
 class PgMsg
   def initialize(msg, from_server)
-    @msg = msg
+    @msg = msg.clone
     @from_server = from_server
   end
 
@@ -281,12 +281,11 @@ class PgMsg
         col_count, r = int16
         s += fmt(r, "#{col_count} columns follow")
         col_count.times do
-          s += "\n"
           _, namer = cstr
           taboidv, taboidr, tabattrnumv, tabattrnumr = int32 + int16
           typoidv, typoidr, typlenv, typlenr, typmodv, typmodr = int32 + int16 + int32
           formatv, formatr = int16
-          s += fmt(
+          s += "\n" + fmt(
             namer, "column name",
             taboidr, "table OID: #{taboidv}",
             tabattrnumr, "table attrib no: #{tabattrnumv}",
@@ -336,7 +335,7 @@ class PgMsg
         s += fmt(r, "number of unrecognised protocol options: #{option_count}")
         option_count.times do
           v, r = cstr
-          s += fmt(r, "unrecognised option")
+          s += "\n" + fmt(r, "unrecognised option")
         end
         "NegotiateProtocolVersion"
       
@@ -349,13 +348,13 @@ class PgMsg
         _, portalr, _, statementr = cstr + cstr
         s += fmt(portalr, "destination portal", statementr, "source prepared statement")
         code_count, r = int16
-        s += fmt(r, "#{code_count} parameter format codes follow")
+        s += "\n" + fmt(r, "#{code_count} parameter format codes follow")
         code_count.times do
           v, r = int16
           s += fmt(r, "format: #{formatdesc(v)}")
         end
         param_count, r = int16
-        s += fmt(r, "#{param_count} parameter values follow")
+        s += "\n" + fmt(r, "#{param_count} parameter values follow")
         param_count.times do
           v, r = int32
           if (v == -1)
@@ -367,7 +366,7 @@ class PgMsg
           end
         end
         result_count, r = int16
-        s += fmt(r, "#{result_count} result format codes follow")
+        s += "\n" + fmt(r, "#{result_count} result format codes follow")
         result_count.times do
           v, r = int16
           s += fmt(r, "format: #{formatdesc(v)}")
@@ -389,20 +388,20 @@ class PgMsg
         v, r = int32
         s += fmt(r, "function OID: #{v}")
         format_count, r = int16
-        s += fmt(r, "#{v} format codes follow")
+        s += "\n" + fmt(r, "#{v} format codes follow")
         format_count.times do
           v, r = int16
           s += fmt(r, "format: #{formatdesc(v)}")
         end
         args_count, r = int16
-        s += fmt(r, "#{args_count} arguments follow")
+        s += "\n" + fmt(r, "#{args_count} arguments follow")
         args_count.times do
           v, r = int32
           bytes = @msg.slice!(0...v)
           s += fmt(r, "#{v} bytes", bytes.inspect, "argument")
         end
         v, r = int16
-        s += fmt(r, "result format: #{formatdesc(v)}")
+        s += "\n" + fmt(r, "result format: #{formatdesc(v)}")
         "FunctionCall"
 
       when "H"; "Flush"
@@ -448,26 +447,21 @@ end
 
 $send_chunks = options[:send_chunks]
 
-def pg_send(sock, *types_and_msgs)
-  buffer = a8('')
-  bytes_sent = 0
+def pg_send(sock, type, msg, from_server, &blk)
+  length_incl = msg.length + 4
+  bytes = a8(type + [length_incl].pack('N') + msg)
+  pg_send_raw(sock, [bytes], from_server, &blk)
+end
 
-  types_and_msgs.each_slice(2) do |type, msg|
-    length_incl = msg.length + 4
-    yield "#{type} #{length_incl} #{msg.inspect}" if block_given?
-
-    bytes = type + [length_incl].pack('N') + msg
-    bytes_sent += bytes.length
-
-    case $send_chunks
-    when 'byte'; bytes.each_char { |char| sock.write(char) }
-    when 'message'; sock.write(bytes)
-    else; buffer += bytes
-    end
+def pg_send_raw(sock, rawmsgs, from_server = nil)
+  rawmsgs.each { |msg| yield PgMsg.new(msg, from_server).inspect } if block_given?
+  bytes = rawmsgs.join()
+  if $send_chunks == 'byte'
+    bytes.each_char { |char| sock.write(char) } 
+  else
+    sock.write(bytes)
   end
-
-  sock.write(buffer) if $send_chunks == 'whole'
-  bytes_sent
+  bytes.length
 end
 
 class PGMessageReader
@@ -510,13 +504,11 @@ class PGMessageReader
     # if blocking: returns message, or nil at EOF
     # if non-blocking: returns message, or false if none available, or nil at EOF
     result = buffer_to(5, blocking) or return result
-    type = @buffer[0]
     length_incl = @buffer[1...5].unpack1('N')
     result = buffer_to(1 + length_incl, blocking) or return result # 1 + not 5 +, because len is inclusive
-    yield PgMsg.new(@buffer[0..length_incl], @from_server).inspect if block_given?
-    @buffer.slice!(0...5) # discard type and length
-    msg = @buffer.slice!(0...length_incl - 4)
-    [type, msg]
+    msg = @buffer.slice!(0..length_incl) # inclusive length accounts for type byte
+    yield PgMsg.new(msg, @from_server).inspect if block_given?
+    msg
   end
 
   def available_messages(&blk)
@@ -647,13 +639,11 @@ while true
 
         if options[:deny_ssl]
           client_sock.write('N')
-          script_to_client('N')
-          puts '^^ tell client we do not support SSL'
+          script_to_client("N".inspect + colourize($colour_annot, ' = SSL is not supported'))
 
         else
           client_sock.write('S')
-          script_to_client('S')
-          puts '^^ tell client we support SSL'
+          script_to_client("S".inspect + colourize($colour_annot, ' = SSL is supported'))
 
           client_sock = OpenSSL::SSL::SSLSocket.new(client_sock, client_ctx).accept # begin handshake
           puts "#{tls_summary(client_sock)} connection established with client", "  server name via SNI: #{target_via_sni}"
@@ -667,9 +657,8 @@ while true
     end
 
     if options[:log_certs] && client_sock.respond_to?(:session)
-      puts client_sock.session.to_text
       puts client_sock.cert.to_text
-      puts client_sock.cert.to_pem
+      puts client_sock.session.cert.to_pem
     end
 
     next if first_eight.nil? # start again if disconnected
@@ -682,7 +671,7 @@ while true
     username = nil
     len = first_eight[0..3].unpack1('N')
     startup_msg = client_sock.read(len - 8)
-    client_to_script("#{len} #{(first_eight[4..] + startup_msg).inspect}")
+    client_to_script("#{len} #{(first_eight[4..] + startup_msg).inspect}") # TODO
     puts '^^ startup message from client'
     startup_msg.split("\x00").each_slice(2).map do |x|
       # interpret strings as key, value, key, ...
@@ -699,8 +688,7 @@ while true
 
     unless server_direct_ssl
       server_sock.write(ssl_request)
-      script_to_server(ssl_request.inspect)
-      puts '^^ sent SSLRequest to server'
+      script_to_server(ssl_request.inspect + colourize($colour_annot, " = SSLRequest"))
 
       server_speaks_ssl = server_sock.read(1)
       server_to_script(server_speaks_ssl)
@@ -722,7 +710,6 @@ while true
 
       puts "#{server_direct_ssl ? 'direct ' : ''}#{tls_summary(server_sock)} connection established with server"
       if options[:log_certs]
-        puts client_sock.session.to_text
         puts server_sock.peer_cert.to_text
         puts server_sock.peer_cert.to_pem
       end
@@ -736,7 +723,7 @@ while true
 
     full_startup = first_eight + startup_msg
     server_sock.write(full_startup)
-    script_to_server("#{len} #{(first_eight[4..] + startup_msg).inspect}")
+    script_to_server("#{len} #{(first_eight[4..] + startup_msg).inspect}") # TODO
     puts '^^ forwarded startup message to server'
 
     server_reader = PGMessageReader.new(server_sock, true)
@@ -745,39 +732,40 @@ while true
     # authentication override, if requested
 
     if options[:force_password] # request password from client, and use it to do either password or SCRAM auth with server
-      msg_type, auth_msg = server_reader.next_message { |str| server_to_script(str) }
-      next if msg_type.nil?
-      raise 'expected auth message' unless msg_type == 'R'
+      auth_msg = server_reader.next_message { |str| server_to_script(str) }
+      next if auth_msg.nil?
+      raise 'expected auth message' unless auth_msg[0] == 'R'
 
-      if auth_msg == a8("\x00\x00\x00\x00")
+      auth_type = auth_msg[5..8]
+      if auth_type == a8("\x00\x00\x00\x00")
         puts '^^ server authenticates us on the spot'
-        pg_send(client_sock, 'R', auth_msg) { |str| script_to_client(str) }
+        pg_send_raw(client_sock, auth_msg, true) { |str| script_to_client(str) }
         puts '^^ forwarded AuthenticationOk message to client'
 
       else
         puts '^^ server auth request'
 
-        pg_send(client_sock, 'R', a8("\x00\x00\x00\x03")) { |str| script_to_client(str) }
+        pg_send(client_sock, 'R', a8("\x00\x00\x00\x03"), true) { |str| script_to_client(str) }
         puts '^^ asked client for cleartext password authentication'
 
-        pwd_type, pwd_bytes = client_reader.next_message { |str| client_to_script(str) }
-        next if pwd_type.nil? # restart on disconnect: this happens if psql prompts the user for the password
-        raise 'expected password message' unless pwd_type == 'p'
+        pwd_msg = client_reader.next_message { |str| client_to_script(str) }
+        next if pwd_msg.nil? # restart on disconnect: this happens if psql prompts the user for the password
+        raise 'expected password message' unless pwd_msg[0] == 'p'
 
-        pwd = pwd_bytes.unpack1('Z*') # last byte is null
+        pwd = pwd_msg[5..].unpack1('Z*') # last byte is null
         puts "^^ password auth message received from client (password: #{pwd})"
 
-        if auth_msg == a8("\x00\x00\x00\x03")
-          pg_send(server_sock, 'p', "#{pwd}\x00") { |str| script_to_server(str) }
+        if auth_type == a8("\x00\x00\x00\x03")
+          pg_send(server_sock, 'p', "#{pwd}\x00", false) { |str| script_to_server(str) }
           puts '^^ sent password to server'
 
-        elsif auth_msg.start_with?(a8("\x00\x00\x00\x05"))
+        elsif auth_type == a8("\x00\x00\x00\x05")
           salt = auth_msg[4..]
           md5 = Digest::MD5.hexdigest(Digest::MD5.hexdigest(pwd + username) + salt)
-          pg_send(server_sock, 'p', a8("md5#{md5}\x00")) { |str| script_to_server(str) }
+          pg_send(server_sock, 'p', a8("md5#{md5}\x00"), false) { |str| script_to_server(str) }
           puts "^^ sent MD5 digest to server: md5(md5(#{pwd.inspect} + #{username.inspect}) + #{salt.inspect})"
 
-        elsif auth_msg.start_with?(a8("\x00\x00\x00\x0a")) # SASL auth request from server
+        elsif auth_type == a8("\x00\x00\x00\x0a") # SASL auth request from server
           unless has_SASL
             puts "SCRAM auth was requested by server but is not supported on this version of Ruby: exiting"
             exit 1
@@ -786,7 +774,7 @@ while true
             'SCRAM-SHA-256-PLUS' => ScramSHA256PlusAuthenticator,
             'SCRAM-SHA-256' => ScramSHA256Authenticator,
           }
-          offered_mechanisms = auth_msg[4..].split("\x00")
+          offered_mechanisms = auth_msg[9..].split("\x00")
           mechanism = (authenticators.keys & offered_mechanisms).first
           raise "no supported SASL mechanism: support #{authenticators.keys.inspect}, offered #{offered_mechanisms.inspect}" if mechanism.nil?
 
@@ -794,24 +782,24 @@ while true
           client_initial_msg = auth.process(nil)
           scram_msg = a8("#{mechanism}\x00#{[client_initial_msg.length].pack('N')}#{client_initial_msg}")
 
-          pg_send(server_sock, 'p', scram_msg) { |str| script_to_server(str) }
+          pg_send(server_sock, 'p', scram_msg, false) { |str| script_to_server(str) }
           puts '^^ sent SASL client-first-message'
 
-          msg_type, auth_msg = server_reader.next_message { |str| server_to_script(str) }
-          next if msg_type.nil?
-          raise 'expected auth message' unless msg_type == 'R'
+          server_first_msg = server_reader.next_message { |str| server_to_script(str) }
+          next if server_first_msg.nil?
+          raise 'expected auth message' unless server_first_msg[0] == 'R' # TODO: check message type
           puts '^^ received SASL server-first-message'
 
-          client_final_msg = auth.process(auth_msg[4..])
-          pg_send(server_sock, 'p', client_final_msg) { |str| script_to_server(str) }
+          client_final_msg = auth.process(server_first_msg[9..])
+          pg_send(server_sock, 'p', client_final_msg, false) { |str| script_to_server(str) }
           puts '^^ sent SASL client-final-message'
 
-          msg_type, server_final_message = server_reader.next_message { |str| server_to_script(str) }
-          next if msg_type.nil?
-          raise 'expected auth message' unless msg_type == 'R'
+          server_final_message = server_reader.next_message { |str| server_to_script(str) }
+          next if server_final_message.nil?
+          raise 'expected auth message' unless server_final_message[0] == 'R' # TODO: check message type
           puts '^^ received SASL server-final-message'
 
-          auth.process(server_final_message[4..]) # this raises an error if server is not authenticated
+          auth.process(server_final_message[9..]) # this raises an error if server is not authenticated
 
         else
           raise 'unsupported server auth type'
@@ -828,7 +816,7 @@ while true
       while true do
         messages = server_reader.available_messages { |str| server_to_client(str) if options[:log_proxied] }
         raise ServerEOFException.new if messages.nil?
-        bytes_sent = pg_send(client_sock, *messages.flatten)
+        bytes_sent = pg_send_raw(client_sock, messages)
         puts "^^ #{bytes_sent} bytes forwarded to client at +#{(t_now - t0).floor(2)}s, #{server_reader.buffer.length} bytes left in buffer"
       end
     end
@@ -838,7 +826,7 @@ while true
     while true do
       messages = client_reader.available_messages { |str| client_to_server(str) if options[:log_proxied] }
       raise ClientEOFException.new if messages.nil?
-      bytes_sent = pg_send(server_sock, *messages.flatten)
+      bytes_sent = pg_send_raw(server_sock, messages)
       puts "^^ #{bytes_sent} bytes forwarded to server at +#{(t_now - t0).floor(2)}s, #{client_reader.buffer.length} bytes left in buffer"
     end
 

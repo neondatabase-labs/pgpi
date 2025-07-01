@@ -6,8 +6,8 @@ require 'securerandom' # for cert generation
 require 'net/imap' # for SASL/SCRAM auth
 require 'digest' # for MD5 auth
 
-script_name = 'pgpi -- Postgres Private Investigator' # note: name must be valid as a certificate CN
-script_info = 'https://github.com/neondatabase-labs/pgpi  Copyright 2025 Databricks, Inc.  License: Apache 2.0'
+script_name = "pgpi -- Postgres Private Investigator" # note: name must be valid as a certificate CN
+script_info = "https://github.com/neondatabase-labs/pgpi  Copyright 2025 Databricks, Inc.  License: Apache 2.0"
 
 options = { # set defaults
   target: nil,
@@ -84,6 +84,7 @@ class ServerEOFException < StandardError; end
 def a8(str) str.force_encoding('ASCII-8BIT') end
 def t_now() Process.clock_gettime(Process::CLOCK_MONOTONIC) end
 def tls_summary(sock) "#{sock.ssl_version}/#{sock.cipher.first}" end
+def hexinspect(bytes) '"' + bytes.unpack1('H*').scan(/../).map { |x| "\\x#{x}" }.join() + '"' end
 
 # colour
 
@@ -148,10 +149,6 @@ class PgMsg
   end
 
   # utils
-
-  def hexinspect(bytes) # like inspect but always uses \xXX hex escapes
-    '"' + bytes.unpack1('H*').scan(/../).map { |x| "\\x#{x}" }.join() + '"'
-  end
 
   def formatdesc(v)
     v == 0 ? "text" : v == 1 ? "binary" : "unknown"

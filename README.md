@@ -1,3 +1,5 @@
+![pgpi logo](pgpi.svg)
+
 # pgpi: Postgres Private Investigator
 
 pgpi is like Wireshark for Postgres. It's designed to help monitor, understand and troubleshoot network traffic between a Postgres client and server, proxy or pooler.

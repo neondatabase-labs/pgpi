@@ -11,21 +11,21 @@ script_info = "https://github.com/neondatabase-labs/pgpi  Copyright 2025 Databri
 
 options = { # set defaults
   target: nil,
-  delete_host_suffix: '.localtest.me',
+  delete_host_suffix: ".localtest.me",
   listen_port: 5432,
   connect_port: 5432,
-  ssl_negotiation: 'mimic',
+  ssl_negotiation: "mimic",
   force_password: false,
-  send_chunks: 'whole',
+  send_chunks: "whole",
   ssl_cert: nil,
   ssl_key: nil,
-  cert_sig: 'rsa',
+  cert_sig: "rsa",
   deny_ssl: false,
   log_certs: false,
-  log_proxied: true,
+  log_proxied: "annotated",
   client_sslkeylogfile: nil,
   server_sslkeylogfile: nil,
-  bw: false,
+  bw: nil,
 }
 
 OptionParser.new do |opts|
@@ -53,15 +53,19 @@ OptionParser.new do |opts|
   opts.on("--[no-]deny-client-ssl",
           "Tell client that SSL is not supported (default: #{options[:deny_ssl]})") { |v| options[:deny_ssl] = v }
   opts.on("--[no-]log-certs",
-          "Log TLS certs and session details (default: #{options[:log_certs]})") { |v| options[:log_certs] = v }
-  opts.on("--[no-]log-traffic",
-          "Log all forwarded traffic (default: #{options[:log_proxied]})") { |v| options[:log_proxied] = v }
+          "Log TLS certificates (default: #{options[:log_certs]})") { |v| options[:log_certs] = v }
+  opts.on("--log-forwarded none|raw|annotated", ["none", "raw", "annotated"],
+          "Whether and how to log forwarded traffic (default: #{options[:log_proxied]})") { |v| options[:log_proxied] = v }
   opts.on("--client-sslkeylogfile /path/to/log",
           "Where to append client traffic TLS decryption data (default: nowhere)") { |v| options[:client_sslkeylogfile] = v }
   opts.on("--server-sslkeylogfile /path/to/log",
           "Where to append server traffic TLS decryption data (default: nowhere)") { |v| options[:server_sslkeylogfile] = v }
-  opts.on("--[no-]bw", "Force monochrome output even to TTY (default: #{options[:bw]})") { |v| options[:bw] = v }
+  opts.on("--[no-]bw", "Force monochrome output even to TTY (default: auto)") { |v| options[:bw] = v }
 end.parse!
+
+$annotate_protocol = options[:log_proxied] == "annotated"
+$send_chunks = options[:send_chunks]
+$colourful = options[:bw].nil? ? STDOUT.tty? : !options[:bw]
 
 # Ruby stdlib compatibility checks
 
@@ -78,42 +82,49 @@ end
 
 # misc utils
 
-class ClientEOFException < StandardError; end
-class ServerEOFException < StandardError; end
-
-def a8(str) str.force_encoding('ASCII-8BIT') end
+def bin_str(str) str.force_encoding('ASCII-8BIT') end
+def hex_inspect(bytes) '"' + bytes.unpack1('H*').scan(/../).map { |x| "\\x#{x}" }.join + '"' end
 def t_now() Process.clock_gettime(Process::CLOCK_MONOTONIC) end
 def tls_summary(sock) "#{sock.ssl_version}/#{sock.cipher.first}" end
-def hexinspect(bytes) '"' + bytes.unpack1('H*').scan(/../).map { |x| "\\x#{x}" }.join() + '"' end
 
 # colour
 
-$colourful = STDOUT.tty? && !options[:bw]
-$colour_s2c = '38;5;45'
-$colour_c2s = '38;5;220'
-$colour_annot = '38;5;243'
+module Colour
+  S2C = '35'
+  C2S = '36'
+  NOTE = '37'
 
-def colourize(colour, s) "#{$colourful ? "\033[#{colour}m" : ''}#{s}#{$colourful ? "\033[0m" : ''}" end
-def puts_colour(colour, s1, s2) puts "#{colourize(colour, s1)}#{s2}" end
+  module_function
+  def colour(colour, s) "#{$colourful ? "\033[#{colour}m" : ''}#{s}#{$colourful ? "\033[0m" : ''}" end
+  def puts(colour, s1, s2) Kernel.puts "#{colour(colour, s1)}#{s2}" end
+end
 
-def server_to_client(str) puts_colour($colour_s2c, 'server -> client: ', str.strip) end
-def server_to_script(str) puts_colour($colour_s2c, 'server -> script: ', str.strip) end
-def script_to_client(str) puts_colour($colour_s2c, 'script -> client: ', str.strip) end
-def client_to_server(str) puts_colour($colour_c2s, 'client -> server: ', str.strip) end
-def client_to_script(str) puts_colour($colour_c2s, 'client -> script: ', str.strip) end
-def script_to_server(str) puts_colour($colour_c2s, 'script -> server: ', str.strip) end
+def server_to_client(s) Colour.puts(Colour::S2C, 'server -> client:', s) end
+def server_to_script(s) Colour.puts(Colour::S2C, 'server -> script:', s) end
+def script_to_client(s) Colour.puts(Colour::S2C, 'script -> client:', s) end
+def client_to_server(s) Colour.puts(Colour::C2S, 'client -> server:', s) end
+def client_to_script(s) Colour.puts(Colour::C2S, 'client -> script:', s) end
+def script_to_server(s) Colour.puts(Colour::C2S, 'script -> server:', s) end
+def annotate(*args)
+  args.each_slice(2)
+      .map { |s, annot| " #{s}#{$annotate_protocol ? Colour.colour(Colour::NOTE, " = #{annot}") : ""}" }
+      .join
+end
 
 # Postgres message parsing
 
-$null_char = a8("\x00")
+$null_char = bin_str("\x00")
+
+def text_or_binary(v) v == 0 ? "text" : v == 1 ? "binary" : "unknown" end
 
 class PgMsg
-  def initialize(msg, from_server)
-    @msg = msg.clone
-    @from_server = from_server
+  def initialize(msg, source, hint = nil)
+    @msg = msg.clone # don't destroy while parsing
+    @source = source # :server, :client, :startup or nil
+    @hint = hint
   end
 
-  # ways to read and consume from @msg
+  # methods to read + consume from @msg
 
   def char
     value = @msg.slice!(0)
@@ -124,21 +135,21 @@ class PgMsg
   def int32
     bytes = @msg.slice!(0...4)
     value = bytes.unpack1('l>')
-    repr = hexinspect(bytes)
+    repr = hex_inspect(bytes)
     [value, repr]
   end
 
   def int16
     bytes = @msg.slice!(0...2)
     value = bytes.unpack1('s>')
-    repr = hexinspect(bytes)
+    repr = hex_inspect(bytes)
     [value, repr]
   end
 
   def int8
     byte = @msg.slice!(0)
     value = byte.unpack1('C')
-    repr = hexinspect(byte)
+    repr = hex_inspect(byte)
     [value, repr]
   end
 
@@ -148,311 +159,351 @@ class PgMsg
     [value, repr]
   end
 
-  # utils
-
-  def formatdesc(v)
-    v == 0 ? "text" : v == 1 ? "binary" : "unknown"
-  end
-
-  def fmt(*args)
-    args.each_slice(2).map { |repr, annot| " #{repr} #{colourize($colour_annot, '= ' + annot)}" }.join()
-  end
-
   # parsing + output
 
   def inspect
+    return " " + @msg.inspect unless $annotate_protocol
+
     s = ''
-    type_value, type_repr = char
-    len_value, len_repr = int32
 
-    type_name = if @from_server
-      case type_value # server messages
-      when "1"; "ParseComplete"
-      when "2"; "BindComplete"
-      when "3"; "CloseComplete"
-        
-      when "A"
-        _, pidr, _, cnr, _, pr = int32 + cstr + cstr
-        s += fmt(pidr, "process ID", cnr, "channel name", pr, "payload")
-        "NotificationResponse"
-
-      when "C"
-        v, r = cstr
-        s += fmt(r, "command tag")
-        "CommandComplete"
-
-      when "D"
-        col_count, r = int16
-        s += fmt(r, "#{col_count} columns follow")
-        col_count.times do
-          s += "\n"
-          v, r = int32
-          s += fmt(r, "null column value") if v == -1
-          s += fmt(r, "#{v} bytes", @msg.slice!(0...v).inspect, "column value") if v != -1
+    if @source == :startup
+      lenv, lenr, vv, vr = int32 + int32
+      puts "unexpected postgres protocol version: #{vr}" unless vv == 0x30000
+      s += annotate(lenr, "#{lenv} bytes of startup message", vr, "protocol version")
+      loop do
+        kv, kr, _, vr = cstr + cstr
+        if kv == ''
+          s += "\n " + annotate(kr, "end")
+          break
         end
-        "DataRow"
-
-      when "E"
-        loop do
-          s += "\n"
-          v, r = char
-          if v == $null_char
-            s += fmt(r, "end")
-            break
-          end
-          err_field = {
-            S: "severity",
-            V: "severity, unlocalized",
-            C: "SQLSTATE code",
-            M: "message",
-            D: "detail",
-            H: "hint",
-            P: "position",
-            p: "internal position",
-            q: "internal query",
-            W: "where",
-            s: "schema",
-            t: "table",
-            c: "column",
-            d: "data type",
-            n: "constraint",
-            F: "file",
-            L: "line",
-            R: "routine"
-          }[v.to_sym]
-          _, fieldr = cstr
-          s += fmt(r, "#{err_field}", fieldr, "value")
-        end
-        "ErrorResponse"
-
-      when "G", "H", "W"
-        fv, fr, col_count, colr = int8 + int16
-        s += fmt(fr, "copy format: #{formatdesc(fv)}", colr, "#{col_count} column formats follow")
-        col_count.times do
-          v, r = int16
-          s += fmt(r, "column format: #{formatdesc(v)}")
-        end
-        { G: "CopyInResponse", H: "CopyOutResponse", W: "CopyBothResponse" }[type_value.to_sym]
-
-      when "I"; "EmptyQueryResponse"
-
-      when "K"
-        _, pidr, _, skr = int32 + int32
-        s += fmt(pidr, "process ID", skr, "secret key")
-        "BackendKeyData"
-
-      when "N"; "NoticeResponse"
-
-      when "R"
-        authtypev, authtyper = int32
-        auth_msg_name = case authtypev
-          when 0; "AuthenticationOk"
-          when 2; "AuthenticationKerberosV5"
-          when 3; "AuthenticationCleartextPassword"
-          when 5
-            bytes = @msg.slice!(0...4)
-            s += fmt(hexinspect(bytes), "MD5 salt")
-            "AuthenticationMD5Password"
-          when 7; "AuthenticationGSS"
-          when 8; "AuthenticationGSSContinue"
-          when 9; "AuthenticationSSPI"
-          when 10
-            begin
-              s += "\n"
-              v, r = cstr
-              s += fmt(r, v == '' ? "end" : "SASL mechanism")
-            end while v != ''
-            "AuthenticationSASL"
-          when 11; "AuthenticationSASLContinue"
-          when 12; "AuthenticationSASLFinal"
-        end
-        s = fmt(authtyper, auth_msg_name) + s
-        "Authentication"
-
-      when "S"
-        _, kr, _, vr = cstr + cstr
-        s += fmt(kr, "key", vr, "value")
-        "ParameterStatus"
-
-      when "T"
-        col_count, r = int16
-        s += fmt(r, "#{col_count} columns follow")
-        col_count.times do
-          _, namer = cstr
-          taboidv, taboidr, tabattrnumv, tabattrnumr = int32 + int16
-          typoidv, typoidr, typlenv, typlenr, typmodv, typmodr = int32 + int16 + int32
-          formatv, formatr = int16
-          s += "\n" + fmt(
-            namer, "column name",
-            taboidr, "table OID: #{taboidv}",
-            tabattrnumr, "table attrib no: #{tabattrnumv}",
-            typoidr, "type OID: #{typoidv}",
-            typlenr, "type length: #{typlenv}",
-            typmodr, "type modifier: #{typmodv}",
-            formatr, "format: #{formatdesc(formatv)}"
-          )
-        end
-        "RowDescription"
-
-      when "V" # TODO: test this somehow
-        v, r = int32
-        if v == -1
-          s += fmt(r, "null value")
-        else
-          s += fmt(r, "#{v} bytes follow")
-          bytes = @msg.slice!(0...v)
-          s += fmt(bytes.inspect, "value")
-        end
-        "FunctionCallResponse"
-
-      when "Z"
-        v, r = char
-        status = { I: "idle", T: "in transaction block", E: "in failed transaction block" }[v.to_sym] || "unknown status"
-        s += fmt(r, status)
-        "ReadyForQuery"
-
-      when "c"; "CopyDone"
-      when "d"; "CopyData"
-      when "n"; "NoData"
-      when "s"; "PortalSuspended"
-
-      when "t"
-        param_count, r = int16
-        s += fmt(r, "number of parameters")
-        param_count.times do 
-          v, r = int32
-          s += fmt(r, "parameter type OID: #{v}")
-        end
-        "ParameterDescription"
-
-      when "v"
-        v, r = int32
-        s += fmt(r, "newest minor protocol version supported: #{v}")
-        option_count, r = int32
-        s += fmt(r, "number of unrecognised protocol options: #{option_count}")
-        option_count.times do
-          v, r = cstr
-          s += "\n" + fmt(r, "unrecognised option")
-        end
-        "NegotiateProtocolVersion"
-      
-      else; "unknown server message"
+        s += "\n " + annotate(kr, "key", vr, "value")
       end
 
     else
-      case type_value # client messages
-      when "B"
-        _, portalr, _, statementr = cstr + cstr
-        s += fmt(portalr, "destination portal", statementr, "source prepared statement")
-        code_count, r = int16
-        s += "\n" + fmt(r, "#{code_count} parameter format codes follow")
-        code_count.times do
-          v, r = int16
-          s += fmt(r, "format: #{formatdesc(v)}")
-        end
-        param_count, r = int16
-        s += "\n" + fmt(r, "#{param_count} parameter values follow")
-        param_count.times do
-          v, r = int32
-          if (v == -1)
-            s += fmt(r, "null")
-          else
-            s += fmt(r, "#{v} bytes follow")
-            bytes = @msg.slice!(0...v)
-            s += fmt(bytes.inspect, "parameter value")
+      type_value, type_repr = char
+      lenv, lenr = int32
+
+      type_name = if @source == :server
+        case type_value # server messages
+        when "1"; "ParseComplete"
+        when "2"; "BindComplete"
+        when "3"; "CloseComplete"
+
+        when "A"
+          _, pidr, _, cnr, _, pr = int32 + cstr + cstr
+          s += annotate(pidr, "process ID", cnr, "channel name", pr, "payload")
+          "NotificationResponse"
+
+        when "C"
+          _, r = cstr
+          s += annotate(r, "command tag")
+          "CommandComplete"
+
+        when "D"
+          col_count, r = int16
+          s += annotate(r, "#{col_count} columns follow")
+          col_count.times do
+            s += "\n "
+            v, r = int32
+            s += annotate(r, "null column value") if v == -1
+            s += annotate(r, "#{v} bytes", @msg.slice!(0...v).inspect, "column value") if v != -1
           end
-        end
-        result_count, r = int16
-        s += "\n" + fmt(r, "#{result_count} result format codes follow")
-        result_count.times do
-          v, r = int16
-          s += fmt(r, "format: #{formatdesc(v)}")
-        end
-        "Bind"
+          "DataRow"
 
-      when "C", "D"
-        thingtypev, thingtyper, _, thingnamer = char + cstr
-        thingtype = thingtypev == "S" ? "prepared statement" : thingtypev == "P" ? "portal" : "unknown"
-        s += fmt(thingtyper, thingtype, thingnamer, "name of #{thingtype}")
-        { C: "Close", D: "Describe" }[type_value.to_sym]
+        when "E"
+          loop do
+            s += "\n "
+            v, r = char
+            if v == $null_char
+              s += annotate(r, "end")
+              break
+            end
+            err_field = {
+              S: "severity",
+              V: "severity, unlocalized",
+              C: "SQLSTATE code",
+              M: "message",
+              D: "detail",
+              H: "hint",
+              P: "position",
+              p: "internal position",
+              q: "internal query",
+              W: "where",
+              s: "schema",
+              t: "table",
+              c: "column",
+              d: "data type",
+              n: "constraint",
+              F: "file",
+              L: "line",
+              R: "routine"
+            }[v.to_sym]
+            _, fieldr = cstr
+            s += annotate(r, "#{err_field}", fieldr, "value")
+          end
+          "ErrorResponse"
 
-      when "E"
-        _, pnr, maxv, maxr = cstr + int32
-        s += fmt(pnr, "portal name", maxr, "max rows: #{maxv}" + (maxv == 0 ? " = no limit" : ""))
-        "Execute"
+        when "G", "H", "W"
+          fv, fr, col_count, colr = int8 + int16
+          s += annotate(fr, "copy format: #{text_or_binary(fv)}", colr, "#{col_count} column formats follow")
+          col_count.times do
+            v, r = int16
+            s += annotate(r, "column format: #{text_or_binary(v)}")
+          end
+          { G: "CopyInResponse", H: "CopyOutResponse", W: "CopyBothResponse" }[type_value.to_sym]
 
-      when "F"
-        v, r = int32
-        s += fmt(r, "function OID: #{v}")
-        format_count, r = int16
-        s += "\n" + fmt(r, "#{v} format codes follow")
-        format_count.times do
-          v, r = int16
-          s += fmt(r, "format: #{formatdesc(v)}")
-        end
-        args_count, r = int16
-        s += "\n" + fmt(r, "#{args_count} arguments follow")
-        args_count.times do
+        when "I"; "EmptyQueryResponse"
+
+        when "K"
+          _, pidr, _, skr = int32 + int32
+          s += annotate(pidr, "process ID", skr, "secret key")
+          "BackendKeyData"
+
+        when "N"; "NoticeResponse"
+
+        when "R"
+          authtypev, authtyper = int32
+          auth_msg_name = case authtypev
+            when 0; "AuthenticationOk"
+            when 2; "AuthenticationKerberosV5"
+            when 3; "AuthenticationCleartextPassword"
+            when 5
+              bytes = @msg.slice!(0...4)
+              s += annotate(hex_inspect(bytes), "MD5 salt")
+              "AuthenticationMD5Password"
+            when 7; "AuthenticationGSS"
+            when 8; "AuthenticationGSSContinue"
+            when 9; "AuthenticationSSPI"
+            when 10
+              begin
+                s += "\n "
+                v, r = cstr
+                s += annotate(r, v == '' ? "end" : "SASL mechanism")
+              end while v != ''
+              "AuthenticationSASL"
+            when 11
+              scramdata = @msg.slice!(0...lenv - 8)
+              s += "\n " + annotate(scramdata.inspect, "SCRAM server-first-message")
+              "AuthenticationSASLContinue"
+            when 12
+              scramdata = @msg.slice!(0...lenv - 8)
+              s += "\n " + annotate(scramdata.inspect, "SCRAM server-final-message")
+              "AuthenticationSASLFinal"
+            else; "unknown auth message type"
+          end
+          s = annotate(authtyper, auth_msg_name) + s
+          "Authentication"
+
+        when "S"
+          _, kr, _, vr = cstr + cstr
+          s += annotate(kr, "key", vr, "value")
+          "ParameterStatus"
+
+        when "T"
+          col_count, r = int16
+          s += annotate(r, "#{col_count} columns follow")
+          col_count.times do
+            _, namer = cstr
+            taboidv, taboidr, tabattrnumv, tabattrnumr = int32 + int16
+            typoidv, typoidr, typlenv, typlenr, typmodv, typmodr = int32 + int16 + int32
+            formatv, formatr = int16
+            s += "\n " + annotate(
+              namer, "column name",
+              taboidr, "table OID: #{taboidv}",
+              tabattrnumr, "table attrib no: #{tabattrnumv}",
+              typoidr, "type OID: #{typoidv}",
+              typlenr, "type length: #{typlenv}",
+              typmodr, "type modifier: #{typmodv}",
+              formatr, "format: #{text_or_binary(formatv)}"
+            )
+          end
+          "RowDescription"
+
+        when "V" # TODO: test this somehow
           v, r = int32
-          bytes = @msg.slice!(0...v)
-          s += fmt(r, "#{v} bytes", bytes.inspect, "argument")
-        end
-        v, r = int16
-        s += "\n" + fmt(r, "result format: #{formatdesc(v)}")
-        "FunctionCall"
+          if v == -1
+            s += annotate(r, "null value")
+          else
+            s += annotate(r, "#{v} bytes follow")
+            bytes = @msg.slice!(0...v)
+            s += annotate(bytes.inspect, "value")
+          end
+          "FunctionCallResponse"
 
-      when "H"; "Flush"
+        when "Z"
+          v, r = char
+          status = { I: "idle", T: "in transaction block", E: "in failed transaction block" }[v.to_sym] || "unknown status"
+          s += annotate(r, status)
+          "ReadyForQuery"
 
-      when "P"
-        _, dr, _, qr = cstr + cstr
-        s += fmt(dr, "destination prepared statement", qr, "SQL query")
-        pdt_count, r = int16
-        s += fmt(r, "#{pdt_count} parameter data types follow")
-        pdt_count.times do
+        when "c"; "CopyDone"
+        when "d"; "CopyData"
+        when "n"; "NoData"
+        when "s"; "PortalSuspended"
+
+        when "t"
+          param_count, r = int16
+          s += annotate(r, "number of parameters")
+          param_count.times do
+            v, r = int32
+            s += annotate(r, "parameter type OID: #{v}")
+          end
+          "ParameterDescription"
+
+        when "v"
           v, r = int32
-          s += fmt(r, "parameter type OID: #{v}")
+          s += annotate(r, "newest minor protocol version supported: #{v}")
+          option_count, r = int32
+          s += annotate(r, "number of unrecognised protocol options: #{option_count}")
+          option_count.times do
+            _, r = cstr
+            s += "\n " + annotate(r, "unrecognised option")
+          end
+          "NegotiateProtocolVersion"
+
+        else; "unknown server message"
         end
-        "Parse"
 
-      when "Q"
-        v, r = cstr
-        s += fmt(r, "query")
-        "Query"
+      elsif @source == :client
+        case type_value
+        when "B"
+          _, portalr, _, statementr = cstr + cstr
+          s += annotate(portalr, "destination portal", statementr, "source prepared statement")
+          code_count, r = int16
+          s += "\n " + annotate(r, "#{code_count} parameter format codes follow")
+          code_count.times do
+            v, r = int16
+            s += annotate(r, "format: #{text_or_binary(v)}")
+          end
+          param_count, r = int16
+          s += "\n " + annotate(r, "#{param_count} parameter values follow")
+          param_count.times do
+            v, r = int32
+            if v == -1
+              s += annotate(r, "null")
+            else
+              s += annotate(r, "#{v} bytes follow")
+              bytes = @msg.slice!(0...v)
+              s += annotate(bytes.inspect, "parameter value")
+            end
+          end
+          result_count, r = int16
+          s += "\n " + annotate(r, "#{result_count} result format codes follow")
+          result_count.times do
+            v, r = int16
+            s += annotate(r, "format: #{text_or_binary(v)}")
+          end
+          "Bind"
 
-      when "S"; "Sync"
-      when "X"; "Terminate"
-      when "c"; "CopyDone"
-      when "d"; "CopyData"
+        when "C", "D"
+          thingtypev, thingtyper, _, thingnamer = char + cstr
+          thingtype = thingtypev == "S" ? "prepared statement" : thingtypev == "P" ? "portal" : "unknown"
+          s += annotate(thingtyper, thingtype, thingnamer, "name of #{thingtype}")
+          { C: "Close", D: "Describe" }[type_value.to_sym]
 
-      when "f"
-        v, r = cstr
-        s += fmt(r, "error message")
-        "CopyFail"
+        when "E"
+          _, pnr, maxv, maxr = cstr + int32
+          s += annotate(pnr, "portal name", maxr, "max rows: #{maxv}" + (maxv == 0 ? " = no limit" : ""))
+          "Execute"
 
-      when "p"; "PasswordMessage, SASLInitialResponse, SASLResponse or GSSResponse"
+        when "F"
+          v, r = int32
+          s += annotate(r, "function OID: #{v}")
+          format_count, r = int16
+          s += "\n " + annotate(r, "#{v} format codes follow")
+          format_count.times do
+            v, r = int16
+            s += annotate(r, "format: #{text_or_binary(v)}")
+          end
+          args_count, r = int16
+          s += "\n " + annotate(r, "#{args_count} arguments follow")
+          args_count.times do
+            v, r = int32
+            bytes = @msg.slice!(0...v)
+            s += annotate(r, "#{v} bytes", bytes.inspect, "argument")
+          end
+          v, r = int16
+          s += "\n " + annotate(r, "result format: #{text_or_binary(v)}")
+          "FunctionCall"
 
-      else; "unknown client message"
+        when "H"; "Flush"
+
+        when "P"
+          _, dr, _, qr = cstr + cstr
+          s += annotate(dr, "destination prepared statement", qr, "SQL query")
+          pdt_count, r = int16
+          s += annotate(r, "#{pdt_count} parameter data types follow")
+          pdt_count.times do
+            v, r = int32
+            s += annotate(r, "parameter type OID: #{v}")
+          end
+          "Parse"
+
+        when "Q"
+          _, r = cstr
+          s += annotate(r, "query")
+          "Query"
+
+        when "S"; "Sync"
+        when "X"; "Terminate"
+        when "c"; "CopyDone"
+        when "d"; "CopyData"
+
+        when "f"
+          _, r = cstr
+          s += annotate(r, "error message")
+          "CopyFail"
+
+        when "p"
+          case @hint
+          when :password
+            _, r = cstr
+            s += annotate(r, "password")
+            "PasswordMessage (plaintext)"
+          when :md5
+            _, r = cstr
+            s += annotate(r, "'md5' + md5(md5(pwd + user) + salt)")
+            "PasswordMessage (MD5)"
+          when :sasl_initial
+            _, r, scramlenv, scramlenr = cstr + int32
+            s += annotate(r, "selected mechanism", scramlenr, "#{scramlenv} bytes follow")
+            scramdata = @msg.slice!(0...scramlenv)
+            s += "\n " + annotate(scramdata.inspect, "SCRAM client-first-message")
+            "SASLInitialResponse"
+          when :sasl_final
+            scramdata = @msg.slice!(0...scramlenv)
+            s += "\n " + annotate(scramdata.inspect, "SCRAM client-final-message")
+            "SASLResponse"
+          else
+            "PasswordMessage/SASLInitialResponse/SASLResponse/GSSResponse"
+          end
+
+        else; "unknown client message"
+        end
+
+      else
+        raise "unknown message source #{@source}"
       end
+
+      s = annotate(type_repr, type_name, lenr, "#{lenv} bytes") + s
     end
 
-    s += fmt(@msg.inspect, "data") if @msg.length > 0 # log any so-far unparsed data
-    fmt(type_repr, type_name, len_repr, "#{len_value} bytes") + s
+    s += annotate(@msg.inspect, "data") if @msg.length > 0 # log any so-far unparsed data
+    s
   end
 end
 
 # Postgres reads and writes
 
-$send_chunks = options[:send_chunks]
-
-def pg_send(sock, type, msg, from_server, &blk)
+def pg_send(sock, type, msg, source, hint = nil, &blk)
   length_incl = msg.length + 4
-  bytes = a8(type + [length_incl].pack('N') + msg)
-  pg_send_raw(sock, [bytes], from_server, &blk)
+  bytes = bin_str(type + [length_incl].pack('N') + msg)
+  pg_send_raw(sock, [bytes], source, hint, &blk)
 end
 
-def pg_send_raw(sock, rawmsgs, from_server = nil)
-  rawmsgs.each { |msg| yield PgMsg.new(msg, from_server).inspect } if block_given?
-  bytes = rawmsgs.join()
+def pg_send_raw(sock, rawmsgs, source = nil, hint = nil)
+  rawmsgs.each { |msg| yield PgMsg.new(msg, source, hint).inspect } if block_given?
+  bytes = rawmsgs.join
   if $send_chunks == 'byte'
     bytes.each_char { |char| sock.write(char) } 
   else
@@ -464,11 +515,11 @@ end
 class PGMessageReader
   attr_reader :buffer
 
-  def initialize(sock, from_server)
+  def initialize(sock, source)
     super()
     @sock = sock
-    @from_server = from_server
-    @buffer = a8('')
+    @source = source # :server, :client, :startup or nil
+    @buffer = bin_str('')
   end
 
   def blocking_buffer_to(length)
@@ -497,14 +548,14 @@ class PGMessageReader
     blocking ? blocking_buffer_to(length) : nonblocking_buffer_to(length)
   end
 
-  def next_message(blocking = true)
+  def next_message(blocking = true, hint = nil)
     # if blocking: returns message, or nil at EOF
     # if non-blocking: returns message, or false if none available, or nil at EOF
     result = buffer_to(5, blocking) or return result
     length_incl = @buffer[1...5].unpack1('N')
     result = buffer_to(1 + length_incl, blocking) or return result # 1 + not 5 +, because len is inclusive
-    msg = @buffer.slice!(0..length_incl) # inclusive length accounts for type byte
-    yield PgMsg.new(msg, @from_server).inspect if block_given?
+    msg = @buffer.slice!(0..length_incl) # inclusive length accounts for the first (message type) byte
+    yield PgMsg.new(msg, @source, hint).inspect if block_given?
     msg
   end
 
@@ -571,9 +622,12 @@ end
 
 # main loop
 
-ssl_request = a8("\x00\x00\x00\b\x04\xD2\x16/")
+ssl_request = bin_str("\x00\x00\x00\b\x04\xD2\x16/")
 
-while true
+class ClientEOFException < StandardError; end
+class ServerEOFException < StandardError; end
+
+loop do
   begin
     puts "listening ..."
     target_via_sni = nil
@@ -618,7 +672,7 @@ while true
     client_direct_ssl = nil
 
     first_byte = client_sock.recv(1, Socket::MSG_PEEK)
-    if first_byte == a8("\x16") # start of a TLS handshake record
+    if first_byte == bin_str("\x16") # start of a TLS handshake record
       client_direct_ssl = true
       client_sock = OpenSSL::SSL::SSLSocket.new(client_sock, client_ctx).accept # begin handshake
       puts "direct #{tls_summary(client_sock)} connection established with client", "  server name via SNI: #{target_via_sni}"
@@ -631,16 +685,15 @@ while true
 
       if first_eight == ssl_request
         client_direct_ssl = false
-        client_to_script(first_eight.inspect)
-        puts '^^ SSLRequest message from client'
+        client_to_script(annotate(hex_inspect(first_eight), "SSLRequest"))
 
         if options[:deny_ssl]
           client_sock.write('N')
-          script_to_client("N".inspect + colourize($colour_annot, ' = SSL is not supported'))
+          script_to_client(annotate("N".inspect, "SSL not supported"))
 
         else
           client_sock.write('S')
-          script_to_client("S".inspect + colourize($colour_annot, ' = SSL is supported'))
+          script_to_client(annotate("S".inspect, "SSL supported"))
 
           client_sock = OpenSSL::SSL::SSLSocket.new(client_sock, client_ctx).accept # begin handshake
           puts "#{tls_summary(client_sock)} connection established with client", "  server name via SNI: #{target_via_sni}"
@@ -649,7 +702,7 @@ while true
         first_eight = client_sock.read(8)
 
       else
-        puts 'no SSLRequest, continuing in plaintext'
+        puts "no SSLRequest: continuing in plaintext"
       end
     end
 
@@ -662,42 +715,35 @@ while true
 
     # connection startup + auth
 
-    version = first_eight[4..]
-    raise 'unexpected postgres protocol version' if version != a8("\x00\x03\x00\x00")
+    len = first_eight[0..3].unpack1("N")
+    startup_msg = client_sock.read(len - 8)
+    full_startup = first_eight + startup_msg
+    client_to_script(PgMsg.new(full_startup, :startup).inspect)
 
     username = nil
-    len = first_eight[0..3].unpack1('N')
-    startup_msg = client_sock.read(len - 8)
-    client_to_script("#{len} #{(first_eight[4..] + startup_msg).inspect}") # TODO
-    puts '^^ startup message from client'
-    startup_msg.split("\x00").each_slice(2).map do |x|
-      # interpret strings as key, value, key, ...
-      puts "  #{x[0]}: #{x[1]}"
-      username = x[1] if x[0] == 'user'
-    end
+    startup_msg.split("\x00").each_slice(2) { |x| username = x[1] if x[0] == "user" }
 
-    server_name = options[:target] || (target_via_sni ? target_via_sni.chomp(options[:delete_host_suffix]) : 'localhost')
+    server_name = options[:target] || (target_via_sni ? target_via_sni.chomp(options[:delete_host_suffix]) : "localhost")
 
     puts "connecting to Postgres server: #{server_name}"
 
     server_sock = TCPSocket.new(server_name, options[:connect_port])
-    server_direct_ssl = options[:ssl_negotiation] == 'direct' || (options[:ssl_negotiation] == 'mimic' && client_direct_ssl)
+    server_direct_ssl = options[:ssl_negotiation] == "direct" || (options[:ssl_negotiation] == "mimic" && client_direct_ssl)
 
     unless server_direct_ssl
       server_sock.write(ssl_request)
-      script_to_server(ssl_request.inspect + colourize($colour_annot, " = SSLRequest"))
+      script_to_server(annotate(hex_inspect(ssl_request), "SSLRequest"))
 
       server_speaks_ssl = server_sock.read(1)
-      server_to_script(server_speaks_ssl)
+      server_to_script(annotate(server_speaks_ssl.inspect, server_speaks_ssl == "S" ? "SSL supported" : "SSL not supported"))
     end
 
-    if server_speaks_ssl == 'S' || server_direct_ssl
-      puts '^^ server speaks SSL' if server_speaks_ssl == 'S'
-
+    if server_speaks_ssl == "S" || server_direct_ssl
       server_ctx = OpenSSL::SSL::SSLContext.new
+
       unless options[:server_sslkeylogfile].nil?
-        server_ctx.keylog_cb = proc do |_sock, line|
-          File.open(options[:server_sslkeylogfile], 'a') { |f| f.puts(line) }
+        server_ctx.keylog_cb = proc do |_, line|
+          File.open(options[:server_sslkeylogfile], "a") { |f| f.puts(line) }
         end
       end
 
@@ -705,64 +751,56 @@ while true
       server_sock.hostname = server_name
       server_sock.connect
 
-      puts "#{server_direct_ssl ? 'direct ' : ''}#{tls_summary(server_sock)} connection established with server"
+      puts "#{server_direct_ssl ? "direct " : ""}#{tls_summary(server_sock)} connection established with server"
       if options[:log_certs]
         puts server_sock.peer_cert.to_text
         puts server_sock.peer_cert.to_pem
       end
 
-    elsif server_speaks_ssl == 'N'
-      puts '^^ server speaks no SSL, continuing without encryption'
+    elsif server_speaks_ssl == "N"
+      puts "continuing without encryption"
 
     else
       raise "expected S or N in response to SSLRequest, but got #{server_speaks_ssl.inspect}"
     end
 
-    full_startup = first_eight + startup_msg
+    puts "forwarding client startup message to server"
     server_sock.write(full_startup)
-    script_to_server("#{len} #{(first_eight[4..] + startup_msg).inspect}") # TODO
-    puts '^^ forwarded startup message to server'
+    script_to_server(PgMsg.new(full_startup, :startup).inspect)
 
-    server_reader = PGMessageReader.new(server_sock, true)
-    client_reader = PGMessageReader.new(client_sock, false)
+    server_reader = PGMessageReader.new(server_sock, :server)
+    client_reader = PGMessageReader.new(client_sock, :client)
 
     # authentication override, if requested
 
     if options[:force_password] # request password from client, and use it to do either password or SCRAM auth with server
+      puts "now overriding authentication"
       auth_msg = server_reader.next_message { |str| server_to_script(str) }
       next if auth_msg.nil?
-      raise 'expected auth message' unless auth_msg[0] == 'R'
+      raise "expected auth message" unless auth_msg[0] == "R"
 
       auth_type = auth_msg[5..8]
-      if auth_type == a8("\x00\x00\x00\x00")
-        puts '^^ server authenticates us on the spot'
-        pg_send_raw(client_sock, auth_msg, true) { |str| script_to_client(str) }
-        puts '^^ forwarded AuthenticationOk message to client'
+      if auth_type == bin_str("\x00\x00\x00\x00")
+        puts "forwarding AuthenticationOk message to client"
+        pg_send_raw(client_sock, auth_msg, :server) { |str| script_to_client(str) }
 
       else
-        puts '^^ server auth request'
+        pg_send(client_sock, 'R', bin_str("\x00\x00\x00\x03"), :server) { |str| script_to_client(str) }
 
-        pg_send(client_sock, 'R', a8("\x00\x00\x00\x03"), true) { |str| script_to_client(str) }
-        puts '^^ asked client for cleartext password authentication'
-
-        pwd_msg = client_reader.next_message { |str| client_to_script(str) }
+        pwd_msg = client_reader.next_message(true, :password) { |str| client_to_script(str) }
         next if pwd_msg.nil? # restart on disconnect: this happens if psql prompts the user for the password
         raise 'expected password message' unless pwd_msg[0] == 'p'
-
         pwd = pwd_msg[5..].unpack1('Z*') # last byte is null
-        puts "^^ password auth message received from client (password: #{pwd})"
 
-        if auth_type == a8("\x00\x00\x00\x03")
-          pg_send(server_sock, 'p', "#{pwd}\x00", false) { |str| script_to_server(str) }
-          puts '^^ sent password to server'
+        if auth_type == bin_str("\x00\x00\x00\x03")
+          pg_send_raw(server_sock, [pwd_msg], :client, :password) { |str| script_to_server(str) }
 
-        elsif auth_type == a8("\x00\x00\x00\x05")
+        elsif auth_type == bin_str("\x00\x00\x00\x05")
           salt = auth_msg[4..]
           md5 = Digest::MD5.hexdigest(Digest::MD5.hexdigest(pwd + username) + salt)
-          pg_send(server_sock, 'p', a8("md5#{md5}\x00"), false) { |str| script_to_server(str) }
-          puts "^^ sent MD5 digest to server: md5(md5(#{pwd.inspect} + #{username.inspect}) + #{salt.inspect})"
+          pg_send(server_sock, 'p', bin_str("md5#{md5}\x00"), :client, :md5) { |str| script_to_server(str) }
 
-        elsif auth_type == a8("\x00\x00\x00\x0a") # SASL auth request from server
+        elsif auth_type == bin_str("\x00\x00\x00\x0a") # SASL auth request from server
           unless has_SASL
             puts "SCRAM auth was requested by server but is not supported on this version of Ruby: exiting"
             exit 1
@@ -777,54 +815,50 @@ while true
 
           auth = authenticators[mechanism].new(username: '*', password: pwd, ssl_cert: server_sock.peer_cert)
           client_initial_msg = auth.process(nil)
-          scram_msg = a8("#{mechanism}\x00#{[client_initial_msg.length].pack('N')}#{client_initial_msg}")
-
-          pg_send(server_sock, 'p', scram_msg, false) { |str| script_to_server(str) }
-          puts '^^ sent SASL client-first-message'
+          scram_msg = bin_str("#{mechanism}\x00#{[client_initial_msg.length].pack('N')}#{client_initial_msg}")
+          pg_send(server_sock, 'p', scram_msg, :client, :sasl_initial) { |str| script_to_server(str) }
 
           server_first_msg = server_reader.next_message { |str| server_to_script(str) }
           next if server_first_msg.nil?
-          raise 'expected auth message' unless server_first_msg[0] == 'R' # TODO: check message type
-          puts '^^ received SASL server-first-message'
+          raise 'expected AuthenticationSASLContinue' unless server_first_msg[0] == 'R' && server_first_msg[5..8] == bin_str("\x00\x00\x00\x0b")
 
           client_final_msg = auth.process(server_first_msg[9..])
-          pg_send(server_sock, 'p', client_final_msg, false) { |str| script_to_server(str) }
-          puts '^^ sent SASL client-final-message'
+          pg_send(server_sock, 'p', client_final_msg, :client, :sasl_final) { |str| script_to_server(str) }
 
           server_final_message = server_reader.next_message { |str| server_to_script(str) }
           next if server_final_message.nil?
-          raise 'expected auth message' unless server_final_message[0] == 'R' # TODO: check message type
-          puts '^^ received SASL server-final-message'
+          raise 'expected AuthenticationSASLFinal' unless server_final_message[0] == 'R' && server_final_message[5..8] == bin_str("\x00\x00\x00\x0c")
 
-          auth.process(server_final_message[9..]) # this raises an error if server is not authenticated
+          auth.process(server_final_message[9..]) # raises an error if server is not authenticated
 
         else
-          raise 'unsupported server auth type'
+          raise "unsupported server auth type"
         end
       end
     end
 
     # proxy all ongoing traffic
 
-    puts 'forwarding all later traffic'
+    log_proxied = options[:log_proxied] != "none"
+    puts "#{log_proxied ? "" : "silently "}forwarding all later traffic"
 
     # pass messages from server to client
     thread = Thread.new do
       while true do
-        messages = server_reader.available_messages { |str| server_to_client(str) if options[:log_proxied] }
+        messages = server_reader.available_messages { |str| server_to_client(str) if log_proxied }
         raise ServerEOFException.new if messages.nil?
         bytes_sent = pg_send_raw(client_sock, messages)
-        puts "^^ #{bytes_sent} bytes forwarded to client at +#{(t_now - t0).floor(2)}s, #{server_reader.buffer.length} bytes left in buffer"
+        puts "^^ #{bytes_sent} bytes forwarded at +#{(t_now - t0).floor(2)}s, #{server_reader.buffer.length} bytes left in buffer" if log_proxied
       end
     end
     thread.abort_on_exception = true
 
     # pass messages from client to server
     while true do
-      messages = client_reader.available_messages { |str| client_to_server(str) if options[:log_proxied] }
+      messages = client_reader.available_messages { |str| client_to_server(str) if log_proxied }
       raise ClientEOFException.new if messages.nil?
       bytes_sent = pg_send_raw(server_sock, messages)
-      puts "^^ #{bytes_sent} bytes forwarded to server at +#{(t_now - t0).floor(2)}s, #{client_reader.buffer.length} bytes left in buffer"
+      puts "^^ #{bytes_sent} bytes forwarded at +#{(t_now - t0).floor(2)}s, #{client_reader.buffer.length} bytes left in buffer" if log_proxied
     end
 
   rescue ServerEOFException

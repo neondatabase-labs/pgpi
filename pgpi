@@ -16,6 +16,7 @@ options = { # set defaults
   connect_port: 5432,
   ssl_negotiation: "mimic",
   force_password: false,
+  redact_passwords: false,
   send_chunks: "whole",
   ssl_cert: nil,
   ssl_key: nil,
@@ -42,6 +43,8 @@ OptionParser.new do |opts|
           "SSL negotiation style: mimic client, direct (supported by Postgres 17+) or traditional Postgres (default: #{options[:ssl_negotiation]})") { |v| options[:ssl_negotiation] = v }
   opts.on("--[no-]override-auth",
           "Require password auth from client, do SASL/MD5/password auth with server (default: #{options[:force_password]})") { |v| options[:force_password] = v }
+  opts.on("--[no-]redact-passwords",
+          "Redact password messages in logs (default: #{options[:redact_passwords]})") { |v| options[:redact_passwords] = v }
   opts.on("--send-chunking whole|byte", ['whole', 'byte'],
           "Chunk size for sending Postgres data (default: #{options[:send_chunks]})") { |v| options[:send_chunks] = v }
   opts.on("--ssl-cert /path/to/cert",
@@ -64,6 +67,7 @@ OptionParser.new do |opts|
 end.parse!
 
 $annotate_protocol = options[:log_proxied] == "annotated"
+$redact_passwords = options[:redact_passwords]
 $send_chunks = options[:send_chunks]
 $colourful = options[:bw].nil? ? STDOUT.tty? : !options[:bw]
 
@@ -92,7 +96,7 @@ def tls_summary(sock) "#{sock.ssl_version}/#{sock.cipher.first}" end
 module Colour
   S2C = '35'
   C2S = '36'
-  NOTE = '37'
+  NOTE = '33'
 
   module_function
   def colour(colour, s) "#{$colourful ? "\033[#{colour}m" : ''}#{s}#{$colourful ? "\033[0m" : ''}" end
@@ -162,8 +166,9 @@ class PgMsg
   # parsing + output
 
   def inspect
+    return annotate("p".inspect, "PasswordMessage/SASLInitialResponse/SASLResponse/GSSResponse: remainder of message redacted") if $redact_passwords && @msg[0] == "p"
     return " " + @msg.inspect unless $annotate_protocol
-
+    
     s = ''
 
     if @source == :startup
@@ -220,7 +225,7 @@ class PgMsg
             end
             err_field = {
               S: "severity",
-              V: "severity, unlocalized",
+              V: "unlocalized severity",
               C: "SQLSTATE code",
               M: "message",
               D: "detail",
@@ -466,7 +471,7 @@ class PgMsg
             "PasswordMessage (MD5)"
           when :sasl_initial
             _, r, scramlenv, scramlenr = cstr + int32
-            s += annotate(r, "selected mechanism", scramlenr, "#{scramlenv} bytes follow")
+            s += "\n " + annotate(r, "selected mechanism", scramlenr, "#{scramlenv} bytes follow")
             scramdata = @msg.slice!(0...scramlenv)
             s += "\n " + annotate(scramdata.inspect, "SCRAM client-first-message")
             "SASLInitialResponse"

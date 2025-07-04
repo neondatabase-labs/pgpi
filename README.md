@@ -1,4 +1,4 @@
-![pgpi logo](README-assets/pgpi.svg)
+![pgpi logo](pgpi.svg)
 
 # pgpi: Postgres Private Investigator
 
@@ -30,7 +30,7 @@ listening ...
 In another terminal, connect to a Neon Postgres database. But first, append `.localtest.me` to the host name and delete `&channel_binding=require` from the parameters. Then run a query:
 
 ```bash
-% psql 'postgresql://neondb_owner:************@ep-crimson-sound-a8nnh11s.eastus2.azure.neon.tech.localtest.me/neondb?sslmode=require'
+% psql 'postgresql://neondb_owner:fake_password@ep-crimson-sound-a8nnh11s.eastus2.azure.neon.tech.localtest.me/neondb?sslmode=require'
 psql (17.5 (Homebrew))
 SSL connection (protocol: TLSv1.3, cipher: TLS_AES_256_GCM_SHA384, compression: off, ALPN: postgresql)
 Type "help" for help.
@@ -78,7 +78,7 @@ server -> script: "R" = Authentication "\x00\x00\x00\x2a" = 42 bytes "\x00\x00\x
   "SCRAM-SHA-256\x00" = SASL mechanism
   "\x00" = end
 script -> client: "R" = Authentication "\x00\x00\x00\x08" = 8 bytes "\x00\x00\x00\x03" = AuthenticationCleartextPassword
-client -> script: "p" = PasswordMessage (plaintext) "\x00\x00\x00\x11" = 17 bytes "************\x00" = password
+client -> script: "p" = PasswordMessage (plaintext) "\x00\x00\x00\x11" = 17 bytes "fake_password\x00" = password
 script -> server: "p" = SASLInitialResponse "\x00\x00\x00\x65" = 101 bytes
   "SCRAM-SHA-256-PLUS\x00" = selected mechanism "\x00\x00\x00\x4a" = 74 bytes follow
   "p=tls-server-end-point,,n=*,r=N4HHGh4Sz16hBjt0c4qkHiUffZ8l5tKp8Zl+zXv+B4I=" = SCRAM client-first-message

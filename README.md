@@ -159,7 +159,7 @@ Usage: pgpi [options]
         --[no-]bw                    Force monochrome output even to TTY (default: auto)
 ```
 
-But what are these options for?
+So what are these options for?
 
 
 ### Getting between your Postgres client and server

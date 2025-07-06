@@ -1,10 +1,10 @@
 #!/usr/bin/env ruby
 
-require 'optparse'
-require 'openssl'
-require 'securerandom' # for cert generation
-require 'net/imap' # for SASL/SCRAM auth
-require 'digest' # for MD5 auth
+require "optparse"
+require "openssl"
+require "securerandom" # for cert generation
+require "net/imap" # for SASL/SCRAM auth
+require "digest" # for MD5 auth
 
 SCRIPT_NAME = "pgpi -- Postgres Private Investigator" # note: name must be valid as a certificate CN
 SCRIPT_INFO = "https://github.com/neondatabase-labs/pgpi ++ Copyright 2025 Databricks, Inc. ++ License: Apache 2.0"
@@ -45,13 +45,13 @@ OptionParser.new do |opts|
           "Require password auth from client, do SASL/MD5/password auth with server (default: #{options[:force_password]})") { |v| options[:force_password] = v }
   opts.on("--[no-]redact-passwords",
           "Redact password messages in logs (default: #{options[:redact_passwords]})") { |v| options[:redact_passwords] = v }
-  opts.on("--send-chunking whole|byte", ['whole', 'byte'],
+  opts.on("--send-chunking whole|byte", ["whole", "byte"],
           "Chunk size for sending Postgres data (default: #{options[:send_chunks]})") { |v| options[:send_chunks] = v }
   opts.on("--ssl-cert /path/to/cert",
           "TLS certificate for connection with client (default: generated, self-signed)") { |v| options[:ssl_cert] = v }
   opts.on("--ssl-key /path/to/key",
           "TLS key for connection with client (default: generated)") { |v| options[:ssl_key] = v }
-  opts.on("--cert-sig rsa|ecdsa", ['rsa', 'ecdsa'],
+  opts.on("--cert-sig rsa|ecdsa", ["rsa", "ecdsa"],
           "Specify RSA or ECDSA signature for generated certificate (default: #{options[:cert_sig]})") { |v| options[:cert_sig] = v}
   opts.on("--[no-]deny-client-ssl",
           "Tell client that SSL is not supported (default: #{options[:deny_ssl]})") { |v| options[:deny_ssl] = v }
@@ -70,7 +70,6 @@ ANNOTATE = options[:log_proxied] == "annotated"
 REDACT = options[:redact_passwords]
 BYTE_WRITE = options[:send_chunks] == "byte"
 COLOURFUL = options[:bw].nil? ? STDOUT.tty? : !options[:bw]
-CR = "\n "
 
 # Ruby stdlib compatibility checks
 
@@ -80,15 +79,15 @@ if options[:force_password] && !has_sasl
   # we'll exit later if SCRAM is requested by server
 end
 
-if options[:cert_sig] == 'ecdsa' && !OpenSSL::PKey::EC.method_defined?(:public_to_pem)
+if options[:cert_sig] == "ecdsa" && !OpenSSL::PKey::EC.method_defined?(:public_to_pem)
   puts "Missing OpenSSL::PKey::EC#public_to_pem, so --cert-sig ecdsa is not supported. Please use Ruby 3.1 or higher."
   exit 1
 end
 
 # misc utils
 
-def bin_str(str) str.force_encoding('ASCII-8BIT') end
-def hex_inspect(bytes) '"' + bytes.unpack1('H*').scan(/../).map { |x| "\\x#{x}" }.join + '"' end
+def bin_str(str) str.force_encoding("ASCII-8BIT") end
+def hex_inspect(bytes) '"' + bytes.unpack1("H*").scan(/../).map { |x| "\\x#{x}" }.join + '"' end
 def t_now() Process.clock_gettime(Process::CLOCK_MONOTONIC) end
 def tls_summary(sock) "#{sock.ssl_version}/#{sock.cipher.first}" end
 
@@ -100,7 +99,7 @@ module Colour
   NOTE = "33"
 end
 
-def colour(c, s) "#{COLOURFUL ? "\033[#{c}m" : ''}#{s}#{COLOURFUL ? "\033[0m" : ''}" end
+def colour(c, s) COLOURFUL ? "\033[#{c}m#{s}\033[0m": s end
 def annotate(*args)
   args.each_slice(2)
       .map { |s, annot| " #{s}#{ANNOTATE ? colour(Colour::NOTE, " = #{annot}") : ""}" }
@@ -116,35 +115,35 @@ def script_to_server(s) "#{colour(Colour::C2S, "script -> server:")}#{s}" end
 
 # Postgres message parsing/annotation
 
-def text_or_binary(v) v == 0 ? "text" : v == 1 ? "binary" : "unknown" end
-
-class PgMsg
-  def initialize(msg, source, prev_msg_queue = nil)
+class PgMessage
+  def initialize(msg, source)
     @msg = msg
     @source = source # :server, :client, :startup or nil
-    @prev_msg_queue = prev_msg_queue
     @i = 0
   end
+  
+  def line_break() "\n " end
+  def text_or_binary(v) v == 0 ? "text" : v == 1 ? "binary" : "unknown" end
 
   # methods to read from @msg: each returns [value, representation]
 
   def int8
     byte = @msg[@i...@i += 1]
-    [byte.unpack1('C'), hex_inspect(byte)]
+    [byte.unpack1("C"), hex_inspect(byte)]
   end
 
   def int16
     bytes = @msg[@i...@i += 2]
-    [bytes.unpack1('s>'), hex_inspect(bytes)]
+    [bytes.unpack1("s>"), hex_inspect(bytes)]
   end
 
   def int32
     bytes = @msg[@i...@i += 4]
-    [bytes.unpack1('l>'), hex_inspect(bytes)]
+    [bytes.unpack1("l>"), hex_inspect(bytes)]
   end
 
   def cstr
-    value = @msg[@i..].unpack1('Z*')
+    value = @msg[@i..].unpack1("Z*")
     bytes = @msg[@i...@i += value.length + 1] # +1 for the null terminator
     [value, bytes.inspect]
   end
@@ -166,21 +165,23 @@ class PgMsg
   # annotation
 
   def inspect
-    return " " + (REDACT && @msg[0] == "p" ? "p".inspect + " [message redacted]" : @msg.inspect) unless ANNOTATE
+    unless ANNOTATE
+      return " " + (REDACT && @msg[0] == "p" ? "[password message redacted]" : @msg.inspect)
+    end
 
     s = ""
-
     if @source == :startup
       lenv, lenr, versionv, versionr = int32 + int32
       puts "unexpected postgres protocol version: #{versionr}" unless versionv == 0x00030000
       s += annotate(lenr, "#{lenv} bytes of startup message", versionr, "protocol version")
       loop do
-        keyv, keyr, _, valuer = cstr + cstr
+        keyv, keyr, = cstr
         if keyv.empty?
-          s += CR + annotate(keyr, "end")
+          s += line_break + annotate(keyr, "end")
           break
         end
-        s += CR + annotate(keyr, "key", valuer, "value")
+        _, valuer = cstr
+        s += line_break + annotate(keyr, "key", valuer, "value")
       end
 
     else
@@ -194,7 +195,9 @@ class PgMsg
         when "3"; "CloseComplete"
 
         when "A"
-          _, pidr, _, channelr, _, payloadr = int32 + cstr + cstr
+          _, pidr = int32
+          _, channelr = cstr
+          _, payloadr = cstr
           s += annotate(pidr, "process ID", channelr, "channel name", payloadr, "payload")
           "NotificationResponse"
 
@@ -207,7 +210,7 @@ class PgMsg
           colcountv, colcountr = int16
           s += annotate(colcountr, "#{colcountv} columns follow")
           colcountv.times do
-            s += CR
+            s += line_break
             collenv, collenr = int32
             if collenv == -1
               s += annotate(collenr, "null column value")
@@ -220,7 +223,7 @@ class PgMsg
 
         when "E"
           loop do
-            s += CR
+            s += line_break
             errfieldv, errfieldr = char
             if errfieldv == bin_str("\x00")
               s += annotate(errfieldr, "end")
@@ -271,33 +274,40 @@ class PgMsg
 
         when "R"
           authtypev, authtyper = int32
+          @@prev_auth_type = authtypev
           auth_msg_name = case authtypev
-            when 0; "AuthenticationOk"
-            when 2; "AuthenticationKerberosV5"
-            when 3; "AuthenticationCleartextPassword"
-            when 5
-              _, saltr = bytes(4)
-              s += annotate(saltr, "MD5 salt")
-              "AuthenticationMD5Password"
-            when 7; "AuthenticationGSS"
-            when 8; "AuthenticationGSSContinue"
-            when 9; "AuthenticationSSPI"
-            when 10
-              begin
-                s += CR
-                mechv, mechr = cstr
-                s += annotate(mechr, mechv.empty? ? "end" : "SASL mechanism")
-              end until mechv.empty?
-              "AuthenticationSASL"
-            when 11
-              _, scramdatar = str(lenv - 8)
-              s += CR + annotate(scramdatar, "SCRAM server-first-message")
-              "AuthenticationSASLContinue"
-            when 12
-              _, scramdatar = str(lenv - 8)
-              s += CR + annotate(scramdatar, "SCRAM server-final-message")
-              "AuthenticationSASLFinal"
-            else; "unknown auth message type"
+          when 0; "AuthenticationOk"
+          when 2; "AuthenticationKerberosV5"
+          when 3; "AuthenticationCleartextPassword"
+          when 7; "AuthenticationGSS"
+          when 8; "AuthenticationGSSContinue"
+          when 9; "AuthenticationSSPI"
+
+          when 5
+            _, saltr = bytes(4)
+            s += annotate(saltr, "MD5 salt")
+            "AuthenticationMD5Password"
+
+          when 10
+            begin
+              s += line_break
+              mechv, mechr = cstr
+              s += annotate(mechr, mechv.empty? ? "end" : "SASL mechanism")
+            end until mechv.empty?
+            "AuthenticationSASL"
+
+          when 11
+            _, scramdatar = str(lenv - 8)
+            s += line_break + annotate(scramdatar, "SCRAM server-first-message")
+            "AuthenticationSASLContinue"
+
+          when 12
+            _, scramdatar = str(lenv - 8)
+            s += line_break + annotate(scramdatar, "SCRAM server-final-message")
+            "AuthenticationSASLFinal"
+
+          else
+            "unknown auth message type"
           end
           s = annotate(authtyper, auth_msg_name) + s
           "Authentication"
@@ -313,12 +323,14 @@ class PgMsg
           colcountv.times do
             _, namer = cstr
             taboidv, taboidr, tabattrnumv, tabattrnumr = int32 + int16
-            typoidv, typoidr, typlenv, typlenr, typmodv, typmodr = int32 + int16 + int32
-            formatv, formatr = int16
-            s += CR + annotate(
+            s += line_break + annotate(
               namer, "column name",
               taboidr, "table OID: #{taboidv}",
-              tabattrnumr, "table attrib no: #{tabattrnumv}",
+              tabattrnumr, "table attrib no: #{tabattrnumv}"
+            )
+            typoidv, typoidr, typlenv, typlenr, typmodv, typmodr = int32 + int16 + int32
+            formatv, formatr = int16
+            s += line_break + annotate(
               typoidr, "type OID: #{typoidv}",
               typlenr, "type length: #{typlenv}",
               typmodr, "type modifier: #{typmodv}",
@@ -365,7 +377,7 @@ class PgMsg
           s += annotate(optioncountr, "number of unrecognised protocol options: #{optioncountv}")
           optioncountv.times do
             _, optionr = cstr
-            s += CR + annotate(optionr, "unrecognised option")
+            s += line_break + annotate(optionr, "unrecognised option")
           end
           "NegotiateProtocolVersion"
 
@@ -378,13 +390,13 @@ class PgMsg
           _, portalr, _, statementr = cstr + cstr
           s += annotate(portalr, "destination portal", statementr, "source prepared statement")
           code_count, r = int16
-          s += CR + annotate(r, "#{code_count} parameter format codes follow")
+          s += line_break + annotate(r, "#{code_count} parameter format codes follow")
           code_count.times do
             v, r = int16
             s += annotate(r, "format: #{text_or_binary(v)}")
           end
           paramcountv, paramcountr = int16
-          s += CR + annotate(paramcountr, "#{paramcountv} parameter values follow")
+          s += line_break + annotate(paramcountr, "#{paramcountv} parameter values follow")
           paramcountv.times do
             paramlenv, paramlenr = int32
             if paramlenv == -1
@@ -396,7 +408,7 @@ class PgMsg
             end
           end
           resultcountv, resultcountr = int16
-          s += CR + annotate(resultcountr, "#{resultcountv} result format codes follow")
+          s += line_break + annotate(resultcountr, "#{resultcountv} result format codes follow")
           resultcountv.times do
             formatv, formatr = int16
             s += annotate(formatr, "format: #{text_or_binary(formatv)}")
@@ -418,20 +430,20 @@ class PgMsg
           fnoidv, fnoidr = int32
           s += annotate(fnoidr, "function OID: #{fnoidv}")
           formatcountv, formatcountr = int16
-          s += CR + annotate(formatcountr, "#{formatcountv} format codes follow")
+          s += line_break + annotate(formatcountr, "#{formatcountv} format codes follow")
           formatcountv.times do
             formatv, formatr = int16
             s += annotate(formatr, "format: #{text_or_binary(formatv)}")
           end
           argscountv, argscountr = int16
-          s += CR + annotate(argscountr, "#{argscountv} arguments follow")
+          s += line_break + annotate(argscountr, "#{argscountv} arguments follow")
           argscountv.times do
             arglenv, arglenr = int32
             _, argvalr = str(arglenv)
             s += annotate(arglenr, "#{arglenv} bytes", argvalr, "argument")
           end
           formatv, formatr = int16
-          s += CR + annotate(formatr, "result format: #{text_or_binary(formatv)}")
+          s += line_break + annotate(formatr, "result format: #{text_or_binary(formatv)}")
           "FunctionCall"
 
         when "H"; "Flush"
@@ -464,33 +476,37 @@ class PgMsg
 
         when "p"
           # p can mean various things depending on context, so we need to check the last message sent the other way
-          prev_msg = @prev_msg_queue.deq until @prev_msg_queue.empty?
-          auth_req_type = prev_msg[5..8].unpack1('N') unless prev_msg.nil?
-
-          case auth_req_type
+          case @@prev_auth_type
           when 3 # AuthenticationCleartextPassword
             _, pwdr = cstr
             s += annotate(REDACT ? "[redacted]" : pwdr, "password")
-            "PasswordMessage (plaintext)"
+            "PasswordMessage (cleartext)"
+
           when 5 # AuthenticationMD5Password
             _, md5r = cstr
             s += annotate(REDACT ? md5r : "[redacted]", "'md5' + md5(md5(pwd + user) + salt)")
             "PasswordMessage (MD5)"
+
           when 10 # AuthenticationSASL
-            _, mechr, scramlenv, scramlenr = cstr + int32
-            s += CR + annotate(mechr, "selected mechanism", scramlenr, "#{scramlenv} bytes follow")
+            _, mechr  = cstr
+            s += line_break + annotate(mechr, "selected mechanism")
+            scramlenv, scramlenr = int32
+            s += line_break + annotate(scramlenr, "#{scramlenv} bytes follow")
             _, scramdata = str(scramlenv)
-            s += CR + annotate(scramdata, "SCRAM client-first-message")
+            s += line_break + annotate(scramdata, "SCRAM client-first-message")
             "SASLInitialResponse"
+
           when 11 # AuthenticationSASLContinue
             _, scramdata = str(lenv - 4)
-            s += CR + annotate(scramdata, "SCRAM client-final-message")
+            s += line_break + annotate(scramdata, "SCRAM client-final-message")
             "SASLResponse"
+
           else
             "PasswordMessage/SASLInitialResponse/SASLResponse/GSSResponse"
           end
 
-        else; "unknown client message"
+        else
+          "unknown client message"
         end
 
       else
@@ -505,14 +521,14 @@ class PgMsg
   end
 end
 
-# Postgres reads and writes
+# Postgres writes
 
 def pg_msg(type, msg)
-  bin_str(type + [msg.length + 4].pack('N') + msg)
+  bin_str(type + [msg.length + 4].pack("N") + msg)
 end
 
-def pg_send(sock, rawmsgs, source = nil, prev_msg_queue = nil)
-  rawmsgs.each { |msg| yield PgMsg.new(msg, source, prev_msg_queue).inspect } if block_given?
+def pg_send(sock, rawmsgs, source = nil)
+  rawmsgs.each { |msg| yield PgMessage.new(msg, source).inspect } if block_given?
   bytes = rawmsgs.join
   if BYTE_WRITE
     bytes.each_char { |char| sock.write(char) }
@@ -521,6 +537,8 @@ def pg_send(sock, rawmsgs, source = nil, prev_msg_queue = nil)
   end
   bytes.length
 end
+
+# Postgres reads
 
 class BufferingConnection
   attr_reader :buffer
@@ -564,21 +582,21 @@ class PGConnection < BufferingConnection
     @source = source # :server, :client, :startup or nil
   end
 
-  def next_message(blocking = true, prev_msg_queue = nil)
+  def next_message(blocking = true)
     # if blocking: returns message, or nil at EOF
     # if non-blocking: returns message, or false if none available, or nil at EOF
     result = buffer_to(5, blocking) or return result
-    length_incl = @buffer[1...5].unpack1('N')
+    length_incl = @buffer[1...5].unpack1("N")
     result = buffer_to(1 + length_incl, blocking) or return result # 1 + not 5 +, because len is inclusive
     msg = @buffer.slice!(0..length_incl) # inclusive length accounts for the first (message type) byte
-    yield PgMsg.new(msg, @source, prev_msg_queue).inspect if block_given?
+    yield PgMessage.new(msg, @source).inspect if block_given?
     msg
   end
 
-  def available_messages(prev_msg_queue = nil, &blk)
+  def available_messages(&blk)
     messages = []
     while true do
-      nm = next_message(messages.empty?, prev_msg_queue, &blk)
+      nm = next_message(messages.empty?, &blk)
       return nil if nm.nil? && messages.empty?
       break unless nm
       messages << nm
@@ -587,7 +605,7 @@ class PGConnection < BufferingConnection
   end
 end
 
-# channel binding support
+# tls-server-end-point channel-binding support for ScramSHA256Authenticator net/imap
 
 if has_sasl
   class ScramSHA256Authenticator < Net::IMAP::SASL::ScramSHA256Authenticator
@@ -619,8 +637,8 @@ end
 # certificate generation
 
 def make_key_and_cert(subject, sig)
-  key = sig == 'ecdsa' ? OpenSSL::PKey::EC.generate('prime256v1') : OpenSSL::PKey::RSA.new(2048)
-  public_key = sig == 'ecdsa' ? OpenSSL::PKey::EC.new(key.public_to_pem) : key.public_key
+  key = sig == "ecdsa" ? OpenSSL::PKey::EC.generate("prime256v1") : OpenSSL::PKey::RSA.new(2048)
+  public_key = sig == "ecdsa" ? OpenSSL::PKey::EC.new(key.public_to_pem) : key.public_key
 
   cert = OpenSSL::X509::Certificate.new
   cert.public_key = public_key
@@ -632,13 +650,13 @@ def make_key_and_cert(subject, sig)
   cert.serial = (1 + SecureRandom.random_number((1 << 128) - 1)).to_bn # not zero
   cert.issuer = cert.subject = OpenSSL::X509::Name.parse(subject)
 
-  cert.sign(key, 'SHA256')
+  cert.sign(key, "SHA256")
   [key, cert]
 end
 
 # main loop
 
-ssl_request = [8, (1234 << 16) + 5679].pack('NN')
+ssl_request = [8, (1234 << 16) + 5679].pack("NN")
 
 class ClientEOFException < StandardError; end
 class ServerEOFException < StandardError; end
@@ -648,7 +666,7 @@ loop do
     puts "listening ..."
     target_via_sni = nil
 
-    server = TCPServer.new('0.0.0.0', options[:listen_port])
+    server = TCPServer.new("0.0.0.0", options[:listen_port])
     client_sock = server.accept
     puts "connected at t0 = #{Time.now}"
     t0 = t_now
@@ -661,7 +679,7 @@ loop do
       client_ctx.key = OpenSSL::PKey::RSA.new(File.open(options[:ssl_key]))
       client_ctx.cert = OpenSSL::X509::Certificate.new(File.open(options[:ssl_cert]))
     else
-      raise 'must specify both or neither of --ssl-cert and --ssl-key' if options[:ssl_key] || options[:ssl_cert]
+      raise "must specify both or neither of --ssl-cert and --ssl-key" if options[:ssl_key] || options[:ssl_cert]
       client_ctx.key, client_ctx.cert = make_key_and_cert("CN=#{SCRIPT_NAME}", options[:cert_sig])
     end
 
@@ -673,13 +691,13 @@ loop do
 
     client_ctx.alpn_select_cb = lambda do |protocols|
       # alpn is required in response for direct SSL connections
-      raise "unexpected ALPN protocols: #{protocols.inspect}" unless protocols == ['postgresql']
+      raise "unexpected ALPN protocols: #{protocols.inspect}" unless protocols == ["postgresql"]
       protocols.first
     end
 
     unless options[:client_sslkeylogfile].nil?
       client_ctx.keylog_cb = proc do |_sock, line|
-        File.open(options[:client_sslkeylogfile], 'a') { |f| f.puts(line) }
+        File.open(options[:client_sslkeylogfile], "a") { |f| f.puts(line) }
       end
     end
 
@@ -704,11 +722,11 @@ loop do
         puts client_to_script(annotate(hex_inspect(first_eight), "SSLRequest"))
 
         if options[:deny_ssl]
-          client_sock.write('N')
+          client_sock.write("N")
           puts script_to_client(annotate("N".inspect, "SSL not supported"))
 
         else
-          client_sock.write('S')
+          client_sock.write("S")
           puts script_to_client(annotate("S".inspect, "SSL supported"))
 
           client_sock = OpenSSL::SSL::SSLSocket.new(client_sock, client_ctx).accept # begin handshake
@@ -734,7 +752,7 @@ loop do
     len = first_eight[0..3].unpack1("N")
     startup_msg = client_sock.read(len - 8)
     full_startup = first_eight + startup_msg
-    puts client_to_script(PgMsg.new(full_startup, :startup).inspect)
+    puts client_to_script(PgMessage.new(full_startup, :startup).inspect)
 
     username = nil
     startup_msg.split("\x00").each_slice(2) { |x| username = x[1] if x[0] == "user" }
@@ -782,7 +800,7 @@ loop do
 
     puts "forwarding client startup message to server"
     server_sock.write(full_startup)
-    puts script_to_server(PgMsg.new(full_startup, :startup).inspect)
+    puts script_to_server(PgMessage.new(full_startup, :startup).inspect)
 
     server_reader = PGConnection.new(server_sock, :server)
     client_reader = PGConnection.new(client_sock, :client)
@@ -801,22 +819,24 @@ loop do
         pg_send(client_sock, [auth_msg], :server) { |str| puts script_to_client(str) }
 
       else
-        pwd_req = pg_msg("R", "\x00\x00\x00\x03")
-        pg_send(client_sock, [pwd_req], :server) { |str| puts script_to_client(str) }
-
-        pwd_msg = client_reader.next_message(true, Queue.new([pwd_req])) { |str| puts client_to_script(str) }
+        # request cleartext password from client
+        pg_send(client_sock, [pg_msg("R", "\x00\x00\x00\x03")], :server) { |str| puts script_to_client(str) }
+        pwd_msg = client_reader.next_message(true) { |str| puts client_to_script(str) }
         next if pwd_msg.nil? # restart on disconnect: this happens if psql prompts the user for the password
         raise "expected password message" unless pwd_msg[0] == "p"
-        pwd = pwd_msg[5..].unpack1("Z*") # last byte is null
+        pwd = pwd_msg[5..].unpack1("Z*") # remove null terminator
+
+        # silently re-parse the auth message so as to keep track of the auth protocol stage we're at with the server
+        PgMessage.new(auth_msg, :server).inspect
 
         case auth_type
-        when 3 # AuthenticationCleartextPassword
-          pg_send(server_sock, [pwd_msg], :client, Queue.new([auth_msg])) { |str| puts script_to_server(str) }
+        when 3 # AuthenticationCleartextPassword -> forward the client's message on
+          pg_send(server_sock, [pwd_msg], :client) { |str| puts script_to_server(str) }
 
         when 5 # AuthenticationMD5
           salt = auth_msg[4..]
           md5 = Digest::MD5.hexdigest(Digest::MD5.hexdigest(pwd + username) + salt)
-          pg_send(server_sock, [pg_msg("p", "md5#{md5}\x00")], :client, Queue.new([auth_msg])) { |str| puts script_to_server(str) }
+          pg_send(server_sock, [pg_msg("p", "md5#{md5}\x00")], :client) { |str| puts script_to_server(str) }
 
         when 10 # AuthenticationSASL
           unless has_sasl
@@ -824,8 +844,8 @@ loop do
             exit 1
           end
           authenticators = { # highest preference first
-            'SCRAM-SHA-256-PLUS' => ScramSHA256PlusAuthenticator,
-            'SCRAM-SHA-256' => ScramSHA256Authenticator,
+            "SCRAM-SHA-256-PLUS" => ScramSHA256PlusAuthenticator,
+            "SCRAM-SHA-256" => ScramSHA256Authenticator,
           }
           offered_mechanisms = auth_msg[9..].split("\x00")
           mechanism = (authenticators.keys & offered_mechanisms).first
@@ -834,14 +854,14 @@ loop do
           auth = authenticators[mechanism].new(username: "*", password: pwd, ssl_cert: server_sock.peer_cert)
           client_initial_msg = auth.process(nil)
           scram_msg = bin_str("#{mechanism}\x00#{[client_initial_msg.length].pack("N")}#{client_initial_msg}")
-          pg_send(server_sock, [pg_msg("p", scram_msg)], :client, Queue.new([auth_msg])) { |str| puts script_to_server(str) }
+          pg_send(server_sock, [pg_msg("p", scram_msg)], :client) { |str| puts script_to_server(str) }
 
           server_first_msg = server_reader.next_message { |str| puts server_to_script(str) }
           next if server_first_msg.nil?
           raise "expected AuthenticationSASLContinue" unless server_first_msg[0] == "R" && server_first_msg[5..8] == bin_str("\x00\x00\x00\x0b")
 
           client_final_msg = auth.process(server_first_msg[9..])
-          pg_send(server_sock, [pg_msg("p", client_final_msg)], :client, Queue.new([server_first_msg])) { |str| puts script_to_server(str) }
+          pg_send(server_sock, [pg_msg("p", client_final_msg)], :client) { |str| puts script_to_server(str) }
 
           server_final_message = server_reader.next_message { |str| puts server_to_script(str) }
           next if server_final_message.nil?
@@ -850,7 +870,7 @@ loop do
           auth.process(server_final_message[9..]) # raises an error if server is not authenticated
 
         else
-          raise "unsupported server auth type: #{auth_type}"
+          raise "unsupported server auth type with code: #{auth_type}"
         end
       end
     end
@@ -860,14 +880,11 @@ loop do
     log_proxied = options[:log_proxied] != "none"
     puts "#{log_proxied ? "" : "silently "}forwarding all later traffic"
 
-    server_msg_queue = Queue.new
-
     # pass messages from server to client
     thread = Thread.new do
       while true do
         messages = server_reader.available_messages { |str| puts server_to_client(str) if log_proxied }
         raise ServerEOFException.new if messages.nil?
-        server_msg_queue.clear.enq(messages.last)  # for context-aware parsing of client 'p' messages
         bytes_sent = pg_send(client_sock, messages)
         puts "^^ #{bytes_sent} bytes forwarded at +#{(t_now - t0).floor(2)}s, #{server_reader.buffer.length} bytes left in buffer" if log_proxied
       end
@@ -876,7 +893,7 @@ loop do
 
     # pass messages from client to server
     while true do
-      messages = client_reader.available_messages(server_msg_queue) { |str| puts client_to_server(str) if log_proxied }
+      messages = client_reader.available_messages { |str| puts client_to_server(str) if log_proxied }
       raise ClientEOFException.new if messages.nil?
       bytes_sent = pg_send(server_sock, messages)
       puts "^^ #{bytes_sent} bytes forwarded at +#{(t_now - t0).floor(2)}s, #{client_reader.buffer.length} bytes left in buffer" if log_proxied

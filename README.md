@@ -2,32 +2,46 @@
 
 # pgpi: Postgres Private Investigator
 
-pgpi is a sort of Wireshark for Postgres. It's designed to help monitor, understand and troubleshoot network traffic between Postgres clients, servers, proxies and poolers.
+`pgpi` is intended to help monitor, understand and troubleshoot network traffic between PostgreSQL endpoints: clients, drivers, ORMs, servers, proxies, and poolers. 
 
-> _Why not just use Wireshark?_ Read on: using Wireshark is one of the things pgpi can help with.
+`pgpi` sits between the two parties in a Postgres-protocol exchange, forwarding messages in both directions while also parsing and logging them.
 
-pgpi sits between the two parties in a Postgres-protocol exchange, forwarding (and perhaps decrypting and re-encrypting) messages while also parsing and logging them. Its other features are designed around that goal.
+### Why not just use Wireshark? 
 
-> _So it's a tool for mounting MITM attacks?_ Only in the same way that a kitchen knife is "a tool for stabbing people". Securing your Postgres connection from MITM attacks is discussed below.
+Ordinarily [Wireshark](https://www.wireshark.org/) is great for this sort of thing, but using Wireshark with Postgres can be difficult if the connection is SSL/TLS-encrypted.
+
+[`SSLKEYLOGFILE`](https://wiki.wireshark.org/TLS#tls-decryption) support was [recently merged into libpq](https://www.postgresql.org/message-id/flat/CAOYmi%2B%3D5GyBKpu7bU4D_xkAnYJTj%3DrMzGaUvHO99-DpNG_YKcw%40mail.gmail.com#afc7fbd9fb2d13959cd97acae8ac8532), but it won’t make it into a release version for some time, and not all Postgres connections use libpq.
+
+To get round the issue, `pgpi` decrypts and re-encrypts a Postgres connection, and it logs and annotates all traffic as it passes through. If you still prefer to use Wireshark, `pgpi` can enable that by writing to a `SSLKEYLOGFILE` instead.
+
+### Postgres and [MITM attacks](https://en.wikipedia.org/wiki/Man-in-the-middle_attack)
+
+If your connection goes over a public network and you can use `pgpi` without changing your connection parameters, _you have an urgent security problem_. `pgpi` did not cause the problem, but it may help you show it up.
+
+To properly secure a Postgres connection, you must use at least one of these options on the client: `channel_binding=require`, `sslrootcert=system`, `sslmode=verify-full`, or (when issuing certificates via your own authority) `sslmode=verify-ca`.
+
+Note that `sslmode=require` is quite widely used but [provides no security against MITM attacks](https://neon.com/blog/postgres-needs-better-connection-security-defaults), because it does nothing to check who’s on the other end of a connection.
+
 
 ## Get started
 
-On macOS, you can use a Homebrew tap to install:
+On macOS, you can use a Homebrew tap to install `pgpi`:
 
 ```bash
 % brew install neondatabase-labs/tools/pgpi
 ```
 
-Otherwise, simply download the `pgpi` Ruby script from this repo and run it using (ideally) Ruby 3.3 or higher.
+Or on any platform, simply download the `pgpi` Ruby script and run it using (ideally) Ruby 3.3 or higher.
 
-## Example output
+
+## Example `psql` session
 
 ```bash
 % pgpi
 listening ...
 ```
 
-In a second terminal, connect to a Neon Postgres database via pgpi. Simply append `.localtest.me` to the host name and change `channel_binding=require` to `channel_binding=disable`:
+In a second terminal, we connect to and query a Neon Postgres database via `pgpi` by (1) appending `.localtest.me` to the host name and (2) changing `channel_binding=require` to `channel_binding=disable`:
 
 ```bash
 % psql 'postgresql://neondb_owner:fake_password@ep-crimson-sound-a8nnh11s.eastus2.azure.neon.tech.localtest.me/neondb?sslmode=require&channel_binding=disable'
@@ -45,7 +59,7 @@ neondb=> \q
 %
 ```
 
-Back in the first terminal, let's see what bytes were exchanged (imagine this is in colour):
+Back in the first terminal, we can see what bytes got exchanged:
 
 ```text
 % ./pgpi
@@ -112,7 +126,8 @@ server -> client: "Z" = ReadyForQuery "\x00\x00\x00\x05" = 5 bytes "I" = idle
 client -> server: "Q" = Query "\x00\x00\x00\x12" = 18 bytes "SELECT now();\x00" = query
 ^^ 19 bytes forwarded at +8.62s, 0 bytes left in buffer
 server -> client: "T" = RowDescription "\x00\x00\x00\x1c" = 28 bytes "\x00\x01" = 1 columns follow
-  "now\x00" = column name "\x00\x00\x00\x00" = table OID: 0 "\x00\x00" = table attrib no: 0 "\x00\x00\x04\xa0" = type OID: 1184 "\x00\x08" = type length: 8 "\xff\xff\xff\xff" = type modifier: -1 "\x00\x00" = format: text
+  "now\x00" = column name "\x00\x00\x00\x00" = table OID: 0 "\x00\x00" = table attrib no: 0 
+  "\x00\x00\x04\xa0" = type OID: 1184 "\x00\x08" = type length: 8 "\xff\xff\xff\xff" = type modifier: -1 "\x00\x00" = format: text
 server -> client: "D" = DataRow "\x00\x00\x00\x27" = 39 bytes "\x00\x01" = 1 columns follow
   "\x00\x00\x00\x1d" = 29 bytes "2025-07-04 13:29:08.633783+00" = column value
 server -> client: "C" = CommandComplete "\x00\x00\x00\x0d" = 13 bytes "SELECT 1\x00" = command tag
@@ -125,6 +140,8 @@ connection end
 
 listening ...
 ```
+
+ (In your terminal, this would be in colour).
 
 ## Options
 
@@ -159,10 +176,15 @@ Usage: pgpi [options]
         --[no-]bw                    Force monochrome output even to TTY (default: auto)
 ```
 
-So what are these options for?
+What are these options for?
 
 
 ### Getting between your Postgres client and server
+
+The key reason to use pgpi is to get between a client and server (or a server and server) and examine what traffic gets sent between them.
+
+
+But this isn’t always easy. In particular, if your Postgres server is configured to connect only via TLS — as any publicly-accessible server should be — 
 
 --delete-host-suffix
 --fixed-host
@@ -195,8 +217,3 @@ So what are these options for?
 --server-sslkeylogfile 
 
 
-## Postgres connection security
-
-If your connection goes over a public network and you find you can use pgpi without changing any connection parameters, you have an urgent security problem. In this case, pgpi is **not** the cause of your problem, but it may help you to demonstrate it. 
-
-Specifically, note that `sslmode=require` provides approximately zero security, because it does nothing to check who is on the other end of a connection. To properly secure a Postgres connection, you **must** use at least one of these connection options: `channel_binding=require`, `sslrootcert=system`, `sslmode=verify-full`, or (when issuing certificates via your own authority) `sslmode=verify-ca`.

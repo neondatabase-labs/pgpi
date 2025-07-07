@@ -2,36 +2,34 @@
 
 # pgpi: Postgres Private Investigator
 
-`pgpi` is intended to help monitor, understand and troubleshoot network traffic between PostgreSQL endpoints: clients, drivers, ORMs, servers, proxies, and poolers. 
+**`pgpi` is intended to help monitor, understand and troubleshoot network traffic between PostgreSQL endpoints. That’s clients, drivers and [ORMs](https://en.wikipedia.org/wiki/Object%E2%80%93relational_mapping) talking to servers, proxies and poolers.**
 
 `pgpi` sits between the two parties in a Postgres-protocol exchange, forwarding messages in both directions while also parsing and logging them.
 
 ### Why not just use Wireshark? 
 
-Ordinarily [Wireshark](https://www.wireshark.org/) is great for this sort of thing, but using Wireshark with Postgres can be difficult if the connection is SSL/TLS-encrypted.
+Ordinarily [Wireshark](https://www.wireshark.org/) is great for this sort of thing, but using Wireshark is difficult if a Postgres connection is SSL/TLS-encrypted. [`SSLKEYLOGFILE`](https://wiki.wireshark.org/TLS#tls-decryption) support was [recently merged into libpq](https://www.postgresql.org/message-id/flat/CAOYmi%2B%3D5GyBKpu7bU4D_xkAnYJTj%3DrMzGaUvHO99-DpNG_YKcw%40mail.gmail.com#afc7fbd9fb2d13959cd97acae8ac8532), but it won’t make it into a release version for some time, and not all Postgres connections use libpq.
 
-[`SSLKEYLOGFILE`](https://wiki.wireshark.org/TLS#tls-decryption) support was [recently merged into libpq](https://www.postgresql.org/message-id/flat/CAOYmi%2B%3D5GyBKpu7bU4D_xkAnYJTj%3DrMzGaUvHO99-DpNG_YKcw%40mail.gmail.com#afc7fbd9fb2d13959cd97acae8ac8532), but it won’t make it into a release version for some time, and not all Postgres connections use libpq.
+To get round the issue, `pgpi` decrypts and re-encrypts a Postgres connection, and it logs and annotates all traffic as it passes through. If you prefer to use Wireshark, `pgpi` can enable that by writing to a `SSLKEYLOGFILE` instead.
 
-To get round the issue, `pgpi` decrypts and re-encrypts a Postgres connection, and it logs and annotates all traffic as it passes through. If you still prefer to use Wireshark, `pgpi` can enable that by writing to a `SSLKEYLOGFILE` instead.
+### Postgres and MITM attacks
 
-### Postgres and [MITM attacks](https://en.wikipedia.org/wiki/Man-in-the-middle_attack)
+If your connection goes over a public network and you can use `pgpi` without changing any connection security options, you’re vulnerable to an [MITM attack](https://en.wikipedia.org/wiki/Man-in-the-middle_attack). This is an urgent security problem. `pgpi` did’t cause it, but it might help you show it up.
 
-If your connection goes over a public network and you can use `pgpi` without changing your connection parameters, _you have an urgent security problem_. `pgpi` did not cause the problem, but it may help you show it up.
-
-To properly secure a Postgres connection, you must use at least one of these options on the client: `channel_binding=require`, `sslrootcert=system`, `sslmode=verify-full`, or (when issuing certificates via your own authority) `sslmode=verify-ca`.
+To properly secure a Postgres connection, you must use at least one of these parameters on the client: `channel_binding=require`, `sslrootcert=system`, `sslmode=verify-full`, or (when issuing certificates via your own authority) `sslmode=verify-ca`.
 
 Note that `sslmode=require` is quite widely used but [provides no security against MITM attacks](https://neon.com/blog/postgres-needs-better-connection-security-defaults), because it does nothing to check who’s on the other end of a connection.
 
 
 ## Get started
 
-On macOS, you can use a Homebrew tap to install `pgpi`:
+On macOS, install `pgpi` via our Homebrew tap:
 
 ```bash
 % brew install neondatabase-labs/tools/pgpi
 ```
 
-Or on any platform, simply download the `pgpi` Ruby script and run it using (ideally) Ruby 3.3 or higher.
+Or on any platform, simply download the `pgpi` script and run it using (ideally) Ruby 3.3 or higher. It has no dependencies beyond the Ruby standard library.
 
 
 ## Example `psql` session
@@ -41,7 +39,7 @@ Or on any platform, simply download the `pgpi` Ruby script and run it using (ide
 listening ...
 ```
 
-In a second terminal, we connect to and query a Neon Postgres database via `pgpi` by (1) appending `.localtest.me` to the host name and (2) changing `channel_binding=require` to `channel_binding=disable`:
+In a second terminal, connect to and query a Neon Postgres database via `pgpi` by (1) appending `.localtest.me` to the host name and (2) changing `channel_binding=require` to `channel_binding=disable`:
 
 ```bash
 % psql 'postgresql://neondb_owner:fake_password@ep-crimson-sound-a8nnh11s.eastus2.azure.neon.tech.localtest.me/neondb?sslmode=require&channel_binding=disable'
@@ -59,7 +57,7 @@ neondb=> \q
 %
 ```
 
-Back in the first terminal, we can see what bytes got exchanged:
+Back in the first terminal, see what bytes got exchanged:
 
 ```text
 % ./pgpi
@@ -141,7 +139,7 @@ connection end
 listening ...
 ```
 
- (In your terminal, this would be in colour).
+ (In the terminal, this would be in colour).
 
 ## Options
 

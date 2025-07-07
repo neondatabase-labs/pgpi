@@ -2,21 +2,21 @@
 
 # pgpi: Postgres Private Investigator
 
-**`pgpi` is intended to help monitor, understand and troubleshoot network traffic between PostgreSQL endpoints. That’s clients, drivers and [ORMs](https://en.wikipedia.org/wiki/Object%E2%80%93relational_mapping) talking to servers, proxies and poolers.**
+**`pgpi` helps monitor, understand and troubleshoot Postgres network traffic: Postgres clients, drivers and [ORMs](https://en.wikipedia.org/wiki/Object%E2%80%93relational_mapping) talking to Postgres servers, proxies and poolers.**
 
-`pgpi` sits between the two parties in a Postgres-protocol exchange, forwarding messages in both directions while also parsing and logging them.
+`pgpi` sits between the two parties in a PostgreSQL-protocol exchange, forwarding messages in both directions while parsing and logging them.
 
 ### Why not just use Wireshark? 
 
-Ordinarily [Wireshark](https://www.wireshark.org/) is great for this sort of thing, but using Wireshark is difficult if a Postgres connection is SSL/TLS-encrypted. [`SSLKEYLOGFILE`](https://wiki.wireshark.org/TLS#tls-decryption) support was [recently merged into libpq](https://www.postgresql.org/message-id/flat/CAOYmi%2B%3D5GyBKpu7bU4D_xkAnYJTj%3DrMzGaUvHO99-DpNG_YKcw%40mail.gmail.com#afc7fbd9fb2d13959cd97acae8ac8532), but it won’t make it into a release version for some time, and not all Postgres connections use libpq.
+Ordinarily [Wireshark](https://www.wireshark.org/) is great for this kind of thing, but using Wireshark is difficult if a connection is SSL/TLS-encrypted. [`SSLKEYLOGFILE`](https://wiki.wireshark.org/TLS#tls-decryption) support was [recently merged into libpq](https://www.postgresql.org/message-id/flat/CAOYmi%2B%3D5GyBKpu7bU4D_xkAnYJTj%3DrMzGaUvHO99-DpNG_YKcw%40mail.gmail.com#afc7fbd9fb2d13959cd97acae8ac8532), but it won’t be available in a release version for some time. And not all Postgres connections use libpq.
 
-To get round the issue, `pgpi` decrypts and re-encrypts a Postgres connection, and it logs and annotates all traffic as it passes through. If you prefer to use Wireshark, `pgpi` can enable that by writing to a `SSLKEYLOGFILE` instead.
+To get round this, `pgpi` decrypts and re-encrypts a Postgres connection. It then logs and annotates the messages passing through. Or if you prefer to use Wireshark, `pgpi` can enable that by writing keys to an `SSLKEYLOGFILE` instead.
 
 ### Postgres and MITM attacks
 
-If your connection goes over a public network and you can use `pgpi` without changing any connection security options, you’re vulnerable to an [MITM attack](https://en.wikipedia.org/wiki/Man-in-the-middle_attack). This is an urgent security problem. `pgpi` didn’t cause it, but it might help you show it up.
+If your connection goes over a public network and you can use `pgpi` without changing any connection security options, you have an urgent security problem: you’re vulnerable to [MITM attacks](https://en.wikipedia.org/wiki/Man-in-the-middle_attack). `pgpi` didn’t cause the problem, but it can help show it up.
 
-To properly secure a Postgres connection, you must use at least one of these parameters on the client: `channel_binding=require`, `sslrootcert=system`, `sslmode=verify-full`, or (when issuing certificates via your own authority) `sslmode=verify-ca`.
+A fully-secure Postgres connection uses at least one of these parameters on the client: `channel_binding=require`, `sslrootcert=system`, `sslmode=verify-full`, or (when issuing certificates via your own certificate authority) `sslmode=verify-ca`. Non-libpq clients and drivers may have other ways to specify these features.
 
 Note that `sslmode=require` is quite widely used but [provides no security against MITM attacks](https://neon.com/blog/postgres-needs-better-connection-security-defaults), because it does nothing to check who’s on the other end of a connection.
 
@@ -143,7 +143,7 @@ listening ...
 
 ## Options
 
-In brief, these are the available options:
+`pgpi --help` lists available options.
 
 ```text
 % pgpi --help
@@ -179,15 +179,41 @@ What are these options for?
 
 ### Getting between your Postgres client and server
 
-The key reason to use pgpi is to get between a client and server (or a server and server) and examine what traffic gets sent between them.
+#### Remote Postgres + local `pgpi` and client
+
+In most cases you’ll probably run `pgpi` and your Postgres client on the same machine, like in the example above.
+
+When you connect your Postgres client via `pgpi` over TLS, `pgpi` uses [SNI](https://en.wikipedia.org/wiki/Server_Name_Indication) to find out what server hostname you gave the client. `pgpi` tries to forward your connection on to the same hostname, except that it first strips off the suffix `.localtest.me` if present.
+
+> [localtest.me](https://github.com/localtest-dot-me/localtest-dot-me.github.com) is a helpful free service where both the root and every possible subdomain — `localtest.me`, `*.localtest.me`, `*.*.localtest.me`, etc. — resolve to your local machine, `127.0.0.1`.
+
+In the example, `ep-crimson-sound-a8nnh11s.eastus2.azure.neon.tech.localtest.me` is just an alias for your local machine, where you’re running `pgpi`. But `pgpi` turns that hostname back into the real hostname, `ep-crimson-sound-a8nnh11s.eastus2.azure.neon.tech`, for the onward connection.
+
+Alternatives:
+
+* Configure `pgpi` to strip a different domain suffix using the option `--delete-host-suffix .abc.xyz`.
+
+* Specify a fixed server hostname instead of getting it via SNI using the `--fixed-host db.blah.xyz` option. This is useful especially for non-TLS connections.
+
+#### Local Postgres, `pgpi` and client
+
+If the server is on the same machine as `pgpi` and the client, you’ll want instead to have `pgpi` and the server listen on different ports. Use `pgpi`'s `--listen-port` and/or `--connect-port` options to achieve this. Both `--listen-port` and `--connect-port` default to `5432`.
+
+So, if the server is running on standard port `5432`, you might do:
+
+```bash
+pgpi --listen-port 5433
+```
+
+And then connect the client via `pgpi`:
+
+```bash
+psql 'postgresql://user:password@localhost:5433/db'
+```
+
+#### Security options
 
 
-But this isn’t always easy. In particular, if your Postgres server is configured to connect only via TLS — as any publicly-accessible server should be — 
-
---delete-host-suffix
---fixed-host
---listen-port
---connect-port
 --override-auth
 --redact-passwords
 --ssl-cert

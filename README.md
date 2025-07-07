@@ -14,14 +14,14 @@ To get round the issue, `pgpi` decrypts and re-encrypts a Postgres connection, a
 
 ### Postgres and MITM attacks
 
-If your connection goes over a public network and you can use `pgpi` without changing any connection security options, you’re vulnerable to an [MITM attack](https://en.wikipedia.org/wiki/Man-in-the-middle_attack). This is an urgent security problem. `pgpi` did’t cause it, but it might help you show it up.
+If your connection goes over a public network and you can use `pgpi` without changing any connection security options, you’re vulnerable to an [MITM attack](https://en.wikipedia.org/wiki/Man-in-the-middle_attack). This is an urgent security problem. `pgpi` didn’t cause it, but it might help you show it up.
 
 To properly secure a Postgres connection, you must use at least one of these parameters on the client: `channel_binding=require`, `sslrootcert=system`, `sslmode=verify-full`, or (when issuing certificates via your own authority) `sslmode=verify-ca`.
 
 Note that `sslmode=require` is quite widely used but [provides no security against MITM attacks](https://neon.com/blog/postgres-needs-better-connection-security-defaults), because it does nothing to check who’s on the other end of a connection.
 
 
-## Get started
+## Get started with `pgpi`
 
 On macOS, install `pgpi` via our Homebrew tap:
 
@@ -32,7 +32,7 @@ On macOS, install `pgpi` via our Homebrew tap:
 Or on any platform, simply download the `pgpi` script and run it using (ideally) Ruby 3.3 or higher. It has no dependencies beyond the Ruby standard library.
 
 
-## Example `psql` session
+## Example session
 
 ```bash
 % pgpi

@@ -181,43 +181,50 @@ What are these options for?
 
 #### Remote Postgres + local `pgpi` and client
 
-In most cases you’ll probably run `pgpi` and your Postgres client on the same machine, like in the example above.
+In many cases you’ll probably run your Postgres client and `pgpi` on the same machine, with the server on a different machine, as in the example above.
 
-When you connect your Postgres client via `pgpi` over TLS, `pgpi` uses [SNI](https://en.wikipedia.org/wiki/Server_Name_Indication) to find out what server hostname you gave the client. `pgpi` tries to forward your connection on to the same hostname, except that it first strips off the suffix `.localtest.me` if present.
+When you connect your Postgres client via `pgpi` over TLS, `pgpi` uses [SNI](https://en.wikipedia.org/wiki/Server_Name_Indication) to find out what server hostname you gave the client. `pgpi` tries to forward the connection on to that same hostname, except that it first strips off the suffix `.localtest.me` if present.
 
 > [localtest.me](https://github.com/localtest-dot-me/localtest-dot-me.github.com) is a helpful free service where both the root and every possible subdomain — `localtest.me`, `*.localtest.me`, `*.*.localtest.me`, etc. — resolve to your local machine, `127.0.0.1`.
 
-In the example, `ep-crimson-sound-a8nnh11s.eastus2.azure.neon.tech.localtest.me` is just an alias for your local machine, where you’re running `pgpi`. But `pgpi` turns that hostname back into the real hostname, `ep-crimson-sound-a8nnh11s.eastus2.azure.neon.tech`, for the onward connection.
+In the example, `ep-crimson-sound-a8nnh11s.eastus2.azure.neon.tech.localtest.me` is just an alias for your local machine, where `pgpi` is running. But `pgpi` then turns that hostname back into the real hostname, `ep-crimson-sound-a8nnh11s.eastus2.azure.neon.tech`, for the onward connection.
 
-Alternatives:
+Alternatively, you can:
 
 * Configure `pgpi` to strip a different domain suffix using the option `--delete-host-suffix .abc.xyz`.
 
-* Specify a fixed server hostname instead of getting it via SNI using the `--fixed-host db.blah.xyz` option. This is useful especially for non-TLS connections.
+* Specify a fixed server hostname, instead of getting it via SNI from the client, using the `--fixed-host db.blah.xyz` option. This is useful especially for non-TLS connections, where SNI is unavailable.
 
 #### Local Postgres, `pgpi` and client
 
-If the server is on the same machine as `pgpi` and the client, you’ll want instead to have `pgpi` and the server listen on different ports. Use `pgpi`'s `--listen-port` and/or `--connect-port` options to achieve this. Both `--listen-port` and `--connect-port` default to `5432`.
+If the server is on the same machine as `pgpi` and the client, you’ll want `pgpi` and the Postgres server to listen for connections on different ports.
 
-So, if the server is running on standard port `5432`, you might do:
+Use `pgpi`'s `--listen-port` and `--connect-port` options to achieve this. Both `--listen-port` and `--connect-port` default to the standard port `5432`. So, if the server is running on port `5432`, you might do:
 
 ```bash
 pgpi --listen-port 5433
 ```
 
-And then connect the client via `pgpi`:
+And then connect the client via `pgpi` on that port:
 
 ```bash
 psql 'postgresql://user:password@localhost:5433/db'
 ```
 
-#### Security options
+### Security configuration
 
+By default, `pgpi` generates a minimal, self-signed TLS certificate on the fly, and does nothing to interfere with the authentication process.
 
---override-auth
---redact-passwords
---ssl-cert
---ssl-key
+If your Postgres client is using `sslmode=verify-full` or `sslmode=verify-ca`, you’ll need to 
+
+1. Downgrade that to `sslmode=require` or lower, or 
+2. Supply `pgpi` with a valid, signed TLS certificate and private key, using the `--ssl-cert` and `--ssl-key` options.
+
+If your Postgres client is using `channel_binding=require`, you’ll need to:
+
+1. Downgrade it to `channel_binding=disable`, or
+2. Downgrade it to `channel_binding=prefer` (the default) _and_ use the `--override-auth` option to have `pgpi` perform authorization (cleartext, MD5 and SCRAM auth are supported, using a password requested from the client in cleartext), or
+3. Supply `pgpi` with precisely the same TLS certificate and private key the server is using via the `--ssl-cert` and `--ssl-key` options.
 
 
 ### Configuring logging
@@ -229,7 +236,6 @@ psql 'postgresql://user:password@localhost:5433/db'
 
 ### Configuring connection options
 
---deny-client-ssl
 --ssl-negotiation
 --cert-sig
 --send-chunking
@@ -237,6 +243,7 @@ psql 'postgresql://user:password@localhost:5433/db'
 
 ### Using Wireshark
 
+--deny-client-ssl
 --client-sslkeylogfile
 --server-sslkeylogfile 
 

@@ -29,7 +29,7 @@ On macOS, install `pgpi` via our Homebrew tap:
 % brew install neondatabase-labs/tools/pgpi
 ```
 
-Or on any platform, simply download the `pgpi` script and run it using (ideally) Ruby 3.3 or higher. It has no dependencies beyond the Ruby standard library.
+Or on any platform, simply download [the `pgpi` script](blob/main/pgpi) and run it using (ideally) Ruby 3.3 or higher. It has no dependencies beyond the Ruby standard library.
 
 
 ## Example session

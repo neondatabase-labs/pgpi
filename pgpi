@@ -757,11 +757,8 @@ loop do
       end
     end
 
-    if options[:log_certs] && client_sock.respond_to?(:session)
-      puts client_sock.cert.to_text
-      puts client_sock.session.cert.to_pem
-    end
-
+    puts client_sock.cert.to_text, client_sock.cert.to_pem if options[:log_certs] && client_sock.respond_to?(:cert)
+    
     next if first_eight.nil? # start again if disconnected
 
     # connection startup + auth
@@ -803,10 +800,7 @@ loop do
       server_sock.connect
 
       puts "#{server_direct_ssl ? "direct " : ""}#{tls_summary(server_sock)} connection established with server"
-      if options[:log_certs]
-        puts server_sock.peer_cert.to_text
-        puts server_sock.peer_cert.to_pem
-      end
+      puts server_sock.peer_cert.to_text, server_sock.peer_cert.to_pem if options[:log_certs]
 
     elsif server_speaks_ssl == "N"
       puts "continuing without encryption"

@@ -220,20 +220,20 @@ By default, `pgpi` generates a minimal, self-signed TLS certificate on the fly, 
 If your Postgres client is using `sslmode=verify-full` or `sslmode=verify-ca`, you’ll need to either:
 
 1. Downgrade that to `sslmode=require` or lower; or 
-2. Supply `pgpi` with a private key and TLS certificate that are trusted by OpenSSL or your OS, using the `--ssl-key` and `--ssl-cert` options.
+2. Supply `pgpi` with a TLS certificate that’s trusted by OpenSSL or your OS, plus the corresponding private key, using the `--ssl-cert` and `--ssl-key` options.
 
 If your Postgres client is using `channel_binding=require`, you’ll need to:
 
 1. Downgrade that to `channel_binding=disable`; or
 2. Downgrade to `channel_binding=prefer` _and_ use the `--override-auth` option to have `pgpi` perform authorization on the client’s behalf (cleartext, MD5 and SCRAM auth are supported, by requesting the cleartext password from the client); or
-3. Supply `pgpi` with precisely the same private key and certificate that the server is using, via the `--ssl-key` and `--ssl-cert` options.
+3. Supply `pgpi` with precisely the same certificate and private key the server is using, via the `--ssl-cert` and `--ssl-key` options.
 
 
 ### Logging
 
-By default, `pgpi` logs and annotates all Postgres traffic it passes through. This behaviour can be specified explicitly as `--log-forwarded annotated`.
+By default, `pgpi` logs and annotates all Postgres traffic that passes through. This behaviour can be specified explicitly as `--log-forwarded annotated`.
 
-The alternatives are `--log-forwarded raw`, which logs the binary data without annotation, or `--log-forwarded none`, which prevents logging. You might use `--log-forwarded none` if you're using `pgpi` to enable the use of Wireshark, for example.
+Alternatives are `--log-forwarded raw`, which logs the binary data without annotation, or `--log-forwarded none`, which prevents logging. You might use `--log-forwarded none` if you're using `pgpi` to enable the use of Wireshark, for example.
 
 Example log line for `--log-forwarded annotated`:
 
@@ -247,7 +247,7 @@ Equivalent log line for `--log-forwarded raw`:
 server -> client: "Z\x00\x00\x00\x05I"
 ```
 
-Use the `--log-certs` option to log the certificates used by both TLS connections (to client and server).
+Use the `--log-certs` option to log the certificates used by the TLS connections to the client and server.
 
 Use the `--bw` option to suppress colours in TTY output (or the `--no-bw` option to force colours even for non-TTY output).
 
@@ -273,5 +273,10 @@ If using Wireshark, you might also want to specify `--log-forwarded none`.
 ### Notes
 
 * Postgres options refer to SSL rather than TLS for historical reasons. `pgpi` options do so for consistency with Postgres. SSL and TLS can be regarded as wholly synonymous here.
-
+* The Postgres protocol has [helpful documentation](https://www.postgresql.org/docs/current/protocol.html).
 * When reading Postgres protocol messages, you’ll see that most are [TLV-encoded](https://en.wikipedia.org/wiki/Type%E2%80%93length%E2%80%93value): they begin with 1 byte for the message’s type and 4 bytes for its length. Note that the 4-byte length value _includes its own length_: for example, it takes the value `4` if no data follows. Length values elsewhere in the protocol typically _do not_ include their own length, however. There is also some apparent inconsistency in whether strings and lists of strings are null-terminated.
+
+
+### Licence
+
+`pgpi` is released under the Apache-2.0 license.

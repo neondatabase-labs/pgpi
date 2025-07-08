@@ -156,7 +156,7 @@ Usage: pgpi [options]
         --listen-port nnnn           Port on which to listen for client connection (default: 5432)
         --connect-port nnnn          Port on which to connect to server (default: 5432)
         --ssl-negotiation mimic|direct|postgres
-                                     SSL negotiation style: mimic client, direct (supported by Postgres 17+) or traditional Postgres (default: mimic)
+                                     SSL negotiation style: mimic client, direct or traditional Postgres (default: mimic)
         --[no-]override-auth         Require password auth from client, do SASL/MD5/password auth with server (default: false)
         --[no-]redact-passwords      Redact password messages in logs (default: false)
         --send-chunking whole|byte   Chunk size for sending Postgres data (default: whole)
@@ -167,6 +167,7 @@ Usage: pgpi [options]
         --[no-]log-certs             Log TLS certificates (default: false)
         --log-forwarded none|raw|annotated
                                      Whether and how to log forwarded traffic (default: annotated)
+        --[no-]quit-on-hangup        Quit when client or server disconnects, instead of looping (default: false)
         --client-sslkeylogfile /path/to/log
                                      Where to append client traffic TLS decryption data (default: nowhere)
         --server-sslkeylogfile /path/to/log
@@ -249,7 +250,9 @@ server -> client: "Z\x00\x00\x00\x05I"
 
 Use the `--log-certs` option to log the certificates used by the TLS connections to the client and server.
 
-Use the `--bw` option to suppress colours in TTY output (or the `--no-bw` option to force colours even for non-TTY output).
+Use `--redact-passwords` to prevent password messages being logged. When logging annotated messages, only passwords and MD5 hashes themselves are redacted. When logging raw bytes, any message beginning with "p" (which could be a password message) is redacted.
+
+Use `--bw` to suppress colours in TTY output (or the `--no-bw` option to force colours even for non-TTY output).
 
 
 ### Configuring connection options
@@ -260,6 +263,7 @@ The `--cert-sig` option specifies the encryption type of the self-signed certifi
 
 If the `--send-chunking byte` option is given, all traffic is forwarded one single byte at a time. This is extremely inefficient, but it can smoke out software that doesn’t correctly buffer its TCP/TLS input. [link to Supavisor issue here?] The default is `--send-chunking whole`, which forwards as many complete Postgres messages as are available when new data are receieved.
 
+The `--quit-on-hangup` option causes the script to exit when the Postgres connection closes, instead of listening for a new connection.
 
 ### Using Wireshark
 

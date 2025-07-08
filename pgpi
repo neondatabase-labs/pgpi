@@ -41,6 +41,7 @@ options = { # set defaults
   client_sslkeylogfile: nil,
   server_sslkeylogfile: nil,
   bw: nil,
+  quit_on_hangup: false,
 }
 
 OptionParser.new do |opts|
@@ -54,7 +55,7 @@ OptionParser.new do |opts|
   opts.on("--connect-port nnnn", /\d{1,5}/,
           "Port on which to connect to server (default: #{options[:connect_port]})") { |v| options[:connect_port] = v.to_i }
   opts.on("--ssl-negotiation mimic|direct|postgres",
-          "SSL negotiation style: mimic client, direct (supported by Postgres 17+) or traditional Postgres (default: #{options[:ssl_negotiation]})") { |v| options[:ssl_negotiation] = v }
+          "SSL negotiation style: mimic client, direct or traditional Postgres (default: #{options[:ssl_negotiation]})") { |v| options[:ssl_negotiation] = v }
   opts.on("--[no-]override-auth",
           "Require password auth from client, do SASL/MD5/password auth with server (default: #{options[:force_password]})") { |v| options[:force_password] = v }
   opts.on("--[no-]redact-passwords",
@@ -73,6 +74,8 @@ OptionParser.new do |opts|
           "Log TLS certificates (default: #{options[:log_certs]})") { |v| options[:log_certs] = v }
   opts.on("--log-forwarded none|raw|annotated", ["none", "raw", "annotated"],
           "Whether and how to log forwarded traffic (default: #{options[:log_proxied]})") { |v| options[:log_proxied] = v }
+  opts.on("--[no-]quit-on-hangup",
+          "Quit when client or server disconnects, instead of looping (default: #{options[:quit_on_hangup]})") { |v| options[:quit_on_hangup] = v }
   opts.on("--client-sslkeylogfile /path/to/log",
           "Where to append client traffic TLS decryption data (default: nowhere)") { |v| options[:client_sslkeylogfile] = v }
   opts.on("--server-sslkeylogfile /path/to/log",
@@ -924,5 +927,7 @@ loop do
     client_sock.close unless client_sock.nil?
     server.close unless server.nil?
     thread.kill unless thread.nil?
+
+    exit if options[:quit_on_hangup]
   end
 end

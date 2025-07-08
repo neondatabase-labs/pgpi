@@ -14,9 +14,9 @@ To get round this, `pgpi` decrypts and re-encrypts a Postgres connection. It the
 
 ### Postgres and MITM attacks
 
-If your connection goes over a public network and you can use `pgpi` without changing any connection security options, you have an urgent security problem: you’re vulnerable to [MITM attacks](https://en.wikipedia.org/wiki/Man-in-the-middle_attack). `pgpi` didn’t cause the problem, but it can help show it up.
+If your connection goes over a public network and you can use `pgpi` without changing any connection security options, you have an urgent security problem: you’re vulnerable to [MITM attacks](https://en.wikipedia.org/wiki/Man-in-the-middle_attack). `pgpi` isn’t the cause of the problem, but it can help show it up.
 
-A fully-secure Postgres connection uses at least one of these parameters on the client: `channel_binding=require`, `sslrootcert=system`, `sslmode=verify-full`, or (when issuing certificates via your own certificate authority) `sslmode=verify-ca`. Non-libpq clients and drivers may have other ways to specify these features.
+A fully-secure Postgres connection requires at least one of these parameters on the client: `channel_binding=require`, `sslrootcert=system`, `sslmode=verify-full`, or (when issuing certificates via your own certificate authority) `sslmode=verify-ca`. Non-libpq clients and drivers may have other ways to specify these features.
 
 Note that `sslmode=require` is quite widely used but [provides no security against MITM attacks](https://neon.com/blog/postgres-needs-better-connection-security-defaults), because it does nothing to check who’s on the other end of a connection.
 
@@ -139,7 +139,7 @@ connection end
 listening ...
 ```
 
- (In the terminal, this would be in colour).
+(In the terminal, this would be in colour).
 
 ## Options
 
@@ -187,9 +187,9 @@ When you connect your Postgres client via `pgpi` over TLS, `pgpi` uses [SNI](htt
 
 > [localtest.me](https://github.com/localtest-dot-me/localtest-dot-me.github.com) is a helpful free service where both the root and every possible subdomain — `localtest.me`, `*.localtest.me`, `*.*.localtest.me`, etc. — resolve to your local machine, `127.0.0.1`.
 
-In the example, `ep-crimson-sound-a8nnh11s.eastus2.azure.neon.tech.localtest.me` is just an alias for your local machine, where `pgpi` is running. But `pgpi` then turns that hostname back into the real hostname, `ep-crimson-sound-a8nnh11s.eastus2.azure.neon.tech`, for the onward connection.
+In the example, `ep-crimson-sound-a8nnh11s.eastus2.azure.neon.tech.localtest.me` is just an alias for your local machine, where `pgpi` is running. `pgpi` then turns that hostname back into the real hostname, `ep-crimson-sound-a8nnh11s.eastus2.azure.neon.tech`, for the onward connection.
 
-Alternatively, you can:
+It’s also possible to:
 
 * Configure `pgpi` to strip a different domain suffix using the option `--delete-host-suffix .abc.xyz`.
 
@@ -199,7 +199,9 @@ Alternatively, you can:
 
 If the server is on the same machine as `pgpi` and the client, you’ll want `pgpi` and the Postgres server to listen for connections on different ports.
 
-Use `pgpi`'s `--listen-port` and `--connect-port` options to achieve this. Both `--listen-port` and `--connect-port` default to the standard port `5432`. So, if the server is running on port `5432`, you might do:
+Use `pgpi`'s `--listen-port` and `--connect-port` options to achieve this. Both `--listen-port` and `--connect-port` default to the standard Postgres port, `5432`.
+
+So if your server is running on port `5432`, you might do:
 
 ```bash
 pgpi --listen-port 5433
@@ -215,36 +217,61 @@ psql 'postgresql://user:password@localhost:5433/db'
 
 By default, `pgpi` generates a minimal, self-signed TLS certificate on the fly, and does nothing to interfere with the authentication process.
 
-If your Postgres client is using `sslmode=verify-full` or `sslmode=verify-ca`, you’ll need to 
+If your Postgres client is using `sslmode=verify-full` or `sslmode=verify-ca`, you’ll need to either:
 
-1. Downgrade that to `sslmode=require` or lower, or 
-2. Supply `pgpi` with a valid, signed TLS certificate and private key, using the `--ssl-cert` and `--ssl-key` options.
+1. Downgrade that to `sslmode=require` or lower; or 
+2. Supply `pgpi` with a private key and TLS certificate that are trusted by OpenSSL or your OS, using the `--ssl-key` and `--ssl-cert` options.
 
 If your Postgres client is using `channel_binding=require`, you’ll need to:
 
-1. Downgrade it to `channel_binding=disable`, or
-2. Downgrade it to `channel_binding=prefer` (the default) _and_ use the `--override-auth` option to have `pgpi` perform authorization (cleartext, MD5 and SCRAM auth are supported, using a password requested from the client in cleartext), or
-3. Supply `pgpi` with precisely the same TLS certificate and private key the server is using via the `--ssl-cert` and `--ssl-key` options.
+1. Downgrade that to `channel_binding=disable`; or
+2. Downgrade to `channel_binding=prefer` _and_ use the `--override-auth` option to have `pgpi` perform authorization on the client’s behalf (cleartext, MD5 and SCRAM auth are supported, by requesting the cleartext password from the client); or
+3. Supply `pgpi` with precisely the same private key and certificate that the server is using, via the `--ssl-key` and `--ssl-cert` options.
 
 
-### Configuring logging
+### Logging
 
---log-forwarded
---log-certs
---bw
+By default, `pgpi` logs and annotates all Postgres traffic it passes through. This behaviour can be specified explicitly as `--log-forwarded annotated`.
+
+The alternatives are `--log-forwarded raw`, which logs the binary data without annotation, or `--log-forwarded none`, which prevents logging. You might use `--log-forwarded none` if you're using `pgpi` to enable the use of Wireshark, for example.
+
+Example log line for `--log-forwarded annotated`:
+
+```text
+server -> client: "Z" = ReadyForQuery "\x00\x00\x00\x05" = 5 bytes "I" = idle
+```
+
+Equivalent log line for `--log-forwarded raw`:
+
+```text
+server -> client: "Z\x00\x00\x00\x05I"
+```
+
+Use the `--log-certs` option to log the certificates used by both TLS connections (to client and server).
+
+Use the `--bw` option to suppress colours in TTY output (or the `--no-bw` option to force colours even for non-TTY output).
 
 
 ### Configuring connection options
 
---ssl-negotiation
---cert-sig
---send-chunking
+The `--ssl-negotiation direct` option tells `pgpi` to initiate a TLS connection to the server immediately, without first sending an SSLRequest message (this is a [new feature in Postgres 17+](https://www.postgresql.org/docs/current/release-17.html#RELEASE-17-LIBPQ) and saves a network round-trip). Specifying `--ssl-negotiation postgres` has the opposite effect. The default is `--ssl-negotiation mimic`, which has `pgpi` do the same thing as the client.
+
+The `--cert-sig` option specifies the encryption type of the self-signed certificate `pgpi` generates. The default is `--cert-sig rsa`, but `--cert-sig ecdsa` is also supported.
+
+If the `--send-chunking byte` option is given, all traffic is forwarded one single byte at a time. This is extremely inefficient, but it can smoke out software that doesn’t correctly buffer its TCP/TLS input. [link to Supavisor issue here?] The default is `--send-chunking whole`, which forwards as many complete Postgres messages as are available when new data are receieved.
 
 
 ### Using Wireshark
 
---deny-client-ssl
---client-sslkeylogfile
---server-sslkeylogfile 
+If you prefer to use Wireshark to analyze your Postgres traffic, you can use the `--client-sslkeylogfile` and/or `--server-sslkeylogfile` options to specify files that will have TLS keys (for either side of the connection) appended for use in decryption.
+
+You could also simply use an unencrypted connection on the client side. The `--deny-client-ssl` option will make `pgpi` tell connecting clients that TLS is not supported (while still supporting TLS for the onward connection to the server).
+
+If using Wireshark, you might also want to specify `--log-forwarded none`.
 
 
+### Notes
+
+* Postgres options refer to SSL rather than TLS for historical reasons. `pgpi` options do so for consistency with Postgres. SSL and TLS can be regarded as wholly synonymous here.
+
+* When reading Postgres protocol messages, you’ll see that most are [TLV-encoded](https://en.wikipedia.org/wiki/Type%E2%80%93length%E2%80%93value): they begin with 1 byte for the message’s type and 4 bytes for its length. Note that the 4-byte length value _includes its own length_: for example, it takes the value `4` if no data follows. Length values elsewhere in the protocol typically _do not_ include their own length, however. There is also some apparent inconsistency in whether strings and lists of strings are null-terminated.

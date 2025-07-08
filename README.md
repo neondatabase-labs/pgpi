@@ -277,6 +277,6 @@ If using Wireshark, you might also want to specify `--log-forwarded none`.
 * When reading Postgres protocol messages, you’ll see that most are [TLV-encoded](https://en.wikipedia.org/wiki/Type%E2%80%93length%E2%80%93value): they begin with 1 byte for the message’s type and 4 bytes for its length. Note that the 4-byte length value _includes its own length_: for example, it takes the value `4` if no data follows. Length values elsewhere in the protocol typically _do not_ include their own length, however. There is also some apparent inconsistency in whether strings and lists of strings are null-terminated.
 
 
-### Licence
+### License
 
 `pgpi` is released under the Apache-2.0 license.

@@ -214,7 +214,7 @@ And then connect the client via `pgpi` on that port:
 psql 'postgresql://user:password@localhost:5433/db'
 ```
 
-### Security configuration
+### Security
 
 By default, `pgpi` generates a minimal, self-signed TLS certificate on the fly, and does nothing to interfere with the authentication process.
 
@@ -234,7 +234,7 @@ If your Postgres client is using `channel_binding=require`, you’ll need to:
 
 By default, `pgpi` logs and annotates all Postgres traffic that passes through. This behaviour can be specified explicitly as `--log-forwarded annotated`.
 
-Alternatives are `--log-forwarded raw`, which logs the binary data without annotation, or `--log-forwarded none`, which prevents logging. You might use `--log-forwarded none` if you're using `pgpi` to enable the use of Wireshark, for example.
+Alternatives are `--log-forwarded raw`, which logs the data without annotation (it just calls Ruby’s `inspect` on the binary string), or `--log-forwarded none`, which prevents logging. You might use `--log-forwarded none` if you're using `pgpi` to enable the use of Wireshark, for example.
 
 Example log line for `--log-forwarded annotated`:
 
@@ -252,16 +252,16 @@ Use the `--log-certs` option to log the certificates used by the TLS connections
 
 Use `--redact-passwords` to prevent password messages being logged. When logging annotated messages, only passwords and MD5 hashes themselves are redacted. When logging raw bytes, any message beginning with "p" (which could be a password message) is redacted.
 
-Use `--bw` to suppress colours in TTY output (or the `--no-bw` option to force colours even for non-TTY output).
+Use `--bw` to suppress colours in TTY output (or `--no-bw` to force colours even for non-TTY output).
 
 
-### Configuring connection options
+### Connection options
 
 The `--ssl-negotiation direct` option tells `pgpi` to initiate a TLS connection to the server immediately, without first sending an SSLRequest message (this is a [new feature in Postgres 17+](https://www.postgresql.org/docs/current/release-17.html#RELEASE-17-LIBPQ) and saves a network round-trip). Specifying `--ssl-negotiation postgres` has the opposite effect. The default is `--ssl-negotiation mimic`, which has `pgpi` do the same thing as the client.
 
 The `--cert-sig` option specifies the encryption type of the self-signed certificate `pgpi` generates. The default is `--cert-sig rsa`, but `--cert-sig ecdsa` is also supported.
 
-If the `--send-chunking byte` option is given, all traffic is forwarded one single byte at a time. This is extremely inefficient, but it can smoke out software that doesn’t correctly buffer its TCP/TLS input. [link to Supavisor issue here?] The default is `--send-chunking whole`, which forwards as many complete Postgres messages as are available when new data are receieved.
+If the `--send-chunking byte` option is given, all traffic is forwarded one single byte at a time. This is extremely inefficient, but it can smoke out software that doesn’t correctly buffer its TCP/TLS input. The default is `--send-chunking whole`, which forwards as many complete Postgres messages as are available when new data are receieved.
 
 The `--quit-on-hangup` option causes the script to exit when the Postgres connection closes, instead of listening for a new connection.
 
@@ -277,10 +277,10 @@ If using Wireshark, you might also want to specify `--log-forwarded none`.
 ### Notes
 
 * Postgres options refer to SSL rather than TLS for historical reasons. `pgpi` options do so for consistency with Postgres. SSL and TLS can be regarded as wholly synonymous here.
-* The Postgres protocol has [helpful documentation](https://www.postgresql.org/docs/current/protocol.html).
 * When reading Postgres protocol messages, you’ll see that most are [TLV-encoded](https://en.wikipedia.org/wiki/Type%E2%80%93length%E2%80%93value): they begin with 1 byte for the message’s type and 4 bytes for its length. Note that the 4-byte length value _includes its own length_: for example, it takes the value `4` if no data follows. Length values elsewhere in the protocol typically _do not_ include their own length, however. There is also some apparent inconsistency in whether strings and lists of strings are null-terminated.
+* The Postgres protocol has some [helpful documentation](https://www.postgresql.org/docs/current/protocol.html).
 
 
 ### License
 
-`pgpi` is released under the Apache-2.0 license.
+`pgpi` is released under the [Apache-2.0 license](LICENSE).

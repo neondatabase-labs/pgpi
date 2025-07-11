@@ -23,10 +23,10 @@ Note that `sslmode=require` is quite widely used but [provides no security again
 
 ## Get started with `pgpi`
 
-On macOS, install `pgpi` via our Homebrew tap:
+On macOS, install `pgpi` via Homebrew tap:
 
 ```bash
-% brew install neondatabase-labs/tools/pgpi
+% brew install neondatabase-labs/tools/pgpi  # TODO: NOT YET IMPLEMENTED
 ```
 
 Or on any platform, simply download [the `pgpi` script](pgpi) and run it using (ideally) Ruby 3.3 or higher. It has no dependencies beyond the Ruby standard library.
@@ -194,7 +194,7 @@ It’s also possible to:
 
 * Configure `pgpi` to strip a different domain suffix using the option `--delete-host-suffix .abc.xyz`.
 
-* Specify a fixed server hostname, instead of getting it via SNI from the client, using the `--fixed-host db.blah.xyz` option. This is useful especially for non-TLS connections, where SNI is unavailable.
+* Specify a fixed server hostname, instead of getting it via SNI from the client, using the `--fixed-host db.blah.xyz` option. This is useful especially for non-TLS client connections, where SNI is unavailable.
 
 #### Local Postgres, `pgpi` and client
 
@@ -211,7 +211,7 @@ pgpi --listen-port 5433
 And then connect the client via `pgpi` on that port:
 
 ```bash
-psql 'postgresql://user:password@localhost:5433/db'
+psql 'postgresql://me:mypassword@localhost:5433/mydb'
 ```
 
 ### Security
@@ -226,7 +226,7 @@ If your Postgres client is using `sslmode=verify-full` or `sslmode=verify-ca`, y
 If your Postgres client is using `channel_binding=require`, you’ll need to:
 
 1. Downgrade that to `channel_binding=disable`; or
-2. Downgrade to `channel_binding=prefer` _and_ use the `--override-auth` option to have `pgpi` perform authorization on the client’s behalf (cleartext, MD5 and SCRAM auth are supported, by requesting the cleartext password from the client); or
+2. Downgrade to `channel_binding=prefer` _and_ use the `--override-auth` option to have `pgpi` perform authorization on the client’s behalf (cleartext, MD5 and SCRAM auth are supported, by requesting the client’s password in cleartext); or
 3. Supply `pgpi` with precisely the same certificate and private key the server is using, via the `--ssl-cert` and `--ssl-key` options.
 
 
@@ -248,7 +248,7 @@ Equivalent log line for `--log-forwarded raw`:
 server -> client: "Z\x00\x00\x00\x05I"
 ```
 
-Use the `--log-certs` option to log the certificates used by the TLS connections to the client and server.
+Use the `--log-certs` option to log the certificates being used by TLS connections to both client and server.
 
 Use `--redact-passwords` to prevent password messages being logged. When logging annotated messages, only passwords and MD5 hashes themselves are redacted. When logging raw bytes, any message beginning with "p" (which could be a password message) is redacted.
 
@@ -261,7 +261,7 @@ The `--ssl-negotiation direct` option tells `pgpi` to initiate a TLS connection 
 
 The `--cert-sig` option specifies the encryption type of the self-signed certificate `pgpi` generates. The default is `--cert-sig rsa`, but `--cert-sig ecdsa` is also supported.
 
-If the `--send-chunking byte` option is given, all traffic is forwarded one single byte at a time. This is extremely inefficient, but it can smoke out software that doesn’t correctly buffer its TCP/TLS input. The default is `--send-chunking whole`, which forwards as many complete Postgres messages as are available when new data are receieved.
+If the `--send-chunking byte` option is given, all traffic is forwarded one single byte at a time. This is extremely inefficient, but it can smoke out software that doesn’t correctly buffer its TCP/TLS input. The default is `--send-chunking whole`, which forwards as many complete Postgres messages as are available when new data are received.
 
 The `--quit-on-hangup` option causes the script to exit when the Postgres connection closes, instead of listening for a new connection.
 
@@ -269,7 +269,7 @@ The `--quit-on-hangup` option causes the script to exit when the Postgres connec
 
 If you prefer to use Wireshark to analyze your Postgres traffic, you can use the `--client-sslkeylogfile` and/or `--server-sslkeylogfile` options to specify files that will have TLS keys (for either side of the connection) appended for use in decryption.
 
-You could also simply use an unencrypted connection on the client side. The `--deny-client-ssl` option will make `pgpi` tell connecting clients that TLS is not supported (while still supporting TLS for the onward connection to the server).
+You could also simply use an unencrypted connection on the client side. Use the `--deny-client-ssl` option to have `pgpi` tell connecting clients that TLS is not supported (while still supporting TLS for the onward connection to the server).
 
 If using Wireshark, you might also want to specify `--log-forwarded none`.
 

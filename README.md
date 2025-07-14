@@ -218,10 +218,10 @@ psql 'postgresql://me:mypassword@localhost:5433/mydb'
 
 By default, `pgpi` generates a minimal, self-signed TLS certificate on the fly, and does nothing to interfere with the authentication process.
 
-If your Postgres client is using `sslmode=verify-full` or `sslmode=verify-ca`, you’ll need to either:
+If your Postgres client is using `sslrootcert=system`, `sslmode=verify-full` or `sslmode=verify-ca` you’ll need to either:
 
 1. Downgrade that to `sslmode=require` or lower; or 
-2. Supply `pgpi` with a TLS certificate that’s trusted by OpenSSL or your OS, plus the corresponding private key, using the `--ssl-cert` and `--ssl-key` options.
+2. Supply `pgpi` with a TLS certificate that’s trusted according to `sslrootcert`, plus the corresponding private key, using the `--ssl-cert` and `--ssl-key` options.
 
 If your Postgres client is using `channel_binding=require`, you’ll need to:
 

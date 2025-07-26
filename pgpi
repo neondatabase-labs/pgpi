@@ -678,12 +678,12 @@ ssl_request = [8, (1234 << 16) + 5679].pack("NN")
 class ClientEOFException < StandardError; end
 class ServerEOFException < StandardError; end
 
+server = TCPServer.new("0.0.0.0", options[:listen_port])
+
 loop do
   begin
     puts "listening ..."
     target_via_sni = nil
-
-    server = TCPServer.new("0.0.0.0", options[:listen_port])
     client_sock = server.accept
     puts "connected at t0 = #{Time.now}"
     t0 = t_now
@@ -723,6 +723,8 @@ loop do
     client_direct_ssl = nil
 
     first_byte = client_sock.recv(1, Socket::MSG_PEEK)
+    next if first_byte.nil?
+
     if first_byte == bin_str("\x16") # start of a TLS handshake record
       client_direct_ssl = true
       client_sock = OpenSSL::SSL::SSLSocket.new(client_sock, client_ctx).accept # begin handshake
@@ -919,7 +921,7 @@ loop do
   ensure
     puts "connection end", ""
     client_sock.close unless client_sock.nil?
-    server.close unless server.nil?
+    #server.close unless server.nil?
     thread.kill unless thread.nil?
 
     exit if options[:quit_on_hangup]

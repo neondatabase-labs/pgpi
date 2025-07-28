@@ -40,7 +40,7 @@ ensure
   Process.kill('SIGTERM', docker_pid) unless docker_pid.nil?
 end
 
-def with_pgpi(args = '', connect_port = 54320, listen_port = 54321)
+def with_pgpi(args = '', listen_port = 54321, connect_port = 54320)
   unkilled = true
   pgpi_pipe = IO.popen("./pgpi --connect-port #{connect_port} --listen-port #{listen_port} #{args}")
   await_port(listen_port)
@@ -93,6 +93,62 @@ begin
         do_test_query('postgresql://frodo:friend@localhost:54321/frodo?sslmode=require&channel_binding=disable')
       end
       result && pgpi_log.include?('client -> server: "X" = Terminate "\x00\x00\x00\x04" = 4 bytes')
+    end
+
+    do_test("strips .localtest.me") do
+      result, _ = with_pgpi do
+        do_test_query('postgresql://frodo:friend@localhost.localtest.me:54321/frodo?sslmode=require&channel_binding=disable')
+      end
+      result
+    end
+
+    do_test("honours --delete-host-suffix") do
+      result, _ = with_pgpi("--delete-host-suffix .127-0-0-1.sslip.io") do
+        do_test_query('postgresql://frodo:friend@localhost.127-0-0-1.sslip.io:54321/frodo?sslmode=require&channel_binding=disable')
+      end
+      result
+    end
+
+    do_test("honours --fixed-host") do
+      result, _ = with_pgpi("--fixed-host localhost") do
+        do_test_query('postgresql://frodo:friend@imaginary.server.localtest.me:54321/frodo?sslmode=require&channel_binding=disable')
+      end
+      result
+    end
+
+    do_test("honours --listen-port") do
+      result, pgpi_log = with_pgpi('', 65432) do
+        do_test_query('postgresql://frodo:friend@localhost:65432/frodo?sslmode=require&channel_binding=disable')
+      end
+      result
+    end
+
+    do_test("--ssl-negotiation postgres") do
+      result, pgpi_log = with_pgpi("--ssl-negotiation postgres") do
+        do_test_query('postgresql://frodo:friend@localhost:54321/frodo?sslmode=require&channel_binding=disable')
+      end
+      result && !pgpi_log.include?("direct TLSv1.3/TLS_AES_256_GCM_SHA384 connection established with server")
+    end
+
+    do_test("--ssl-negotiation direct") do
+      result, pgpi_log = with_pgpi("--ssl-negotiation direct") do
+        do_test_query('postgresql://frodo:friend@localhost:54321/frodo?sslmode=require&channel_binding=disable')
+      end
+      result && pgpi_log.include?("direct TLSv1.3/TLS_AES_256_GCM_SHA384 connection established with server")
+    end
+
+    do_test("--ssl-negotiation mimic (postgres)") do
+      result, pgpi_log = with_pgpi do
+        do_test_query('postgresql://frodo:friend@localhost:54321/frodo?sslmode=require&channel_binding=disable&sslnegotiation=postgres')
+      end
+      result && !pgpi_log.include?("direct TLSv1.3/TLS_AES_256_GCM_SHA384 connection established with server")
+    end
+
+    do_test("--ssl-negotiation mimic (direct)") do
+      result, pgpi_log = with_pgpi do
+        do_test_query('postgresql://frodo:friend@localhost:54321/frodo?sslmode=require&channel_binding=disable&sslnegotiation=direct')
+      end
+      result && pgpi_log.include?("direct TLSv1.3/TLS_AES_256_GCM_SHA384 connection established with server")
     end
 
   end

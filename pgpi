@@ -790,6 +790,7 @@ loop do
 
     if server_speaks_ssl == "S" || server_direct_ssl
       server_ctx = OpenSSL::SSL::SSLContext.new
+      server_ctx.alpn_protocols = ['postgresql']  # required for direct connections
 
       unless options[:server_sslkeylogfile].nil?
         server_ctx.keylog_cb = proc do |_, line|

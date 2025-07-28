@@ -501,7 +501,7 @@ class PgMessage
 
           when 5 # AuthenticationMD5Password
             _, md5r = cstr
-            s += annotate(REDACT ? md5r : "[redacted]", "'md5' + md5(md5(pwd + user) + salt)")
+            s += annotate(REDACT ? "[redacted]" : md5r, "'md5' + md5(md5(pwd + user) + salt)")
             "PasswordMessage (MD5)"
 
           when 10 # AuthenticationSASL
@@ -848,7 +848,7 @@ loop do
           pg_send(server_sock, [pwd_msg], :client) { |str| puts script_to_server(str) }
 
         when 5 # AuthenticationMD5
-          salt = auth_msg[4..]
+          salt = auth_msg[9..]
           md5 = Digest::MD5.hexdigest(Digest::MD5.hexdigest(pwd + username) + salt)
           pg_send(server_sock, [pg_msg("p", "md5#{md5}\x00")], :client) { |str| puts script_to_server(str) }
 

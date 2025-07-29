@@ -100,6 +100,7 @@ end
 def contains(haystack, needle, expected = true)
   return true if haystack.include?(needle) == expected
   puts haystack
+  puts "-> did not contain: #{needle}"
   false
 end
 
@@ -215,11 +216,55 @@ begin
                                    '  "SCRAM-SHA-256-PLUS\x00" = selected mechanism')
     end
 
-    do_test("ECDSA generated cert") do
-      result, pgpi_log = with_pgpi("--cert-sig ecdsa") do
+    do_test("--log-certs and RSA generated cert") do
+      result, pgpi_log = with_pgpi("--log-certs") do
         do_test_query('postgresql://frodo:friend@localhost:54321/frodo?sslmode=require&channel_binding=disable')
       end
-      result && contains(pgpi_log, 'xxx')
+      result && contains(pgpi_log, '        Subject: CN=pgpi -- Postgres Private Investigator' + "\n" +
+                                   '        Subject Public Key Info:' + "\n" +
+                                   '            Public Key Algorithm: rsaEncryption' + "\n" +
+                                   '                Public-Key: (2048 bit)')
+    end
+
+    do_test("--log-certs and ECDSA generated cert") do
+      result, pgpi_log = with_pgpi("--log-certs --cert-sig ecdsa") do
+        do_test_query('postgresql://frodo:friend@localhost:54321/frodo?sslmode=require&channel_binding=disable')
+      end
+      result && contains(pgpi_log, '        Subject: CN=pgpi -- Postgres Private Investigator' + "\n" +
+                                   '        Subject Public Key Info:' + "\n" +
+                                   '            Public Key Algorithm: id-ecPublicKey' + "\n" +
+                                   '                Public-Key: (256 bit)')
+    end
+
+    do_test("--deny-client-ssl causes connection error with sslmode=require") do
+      err_msg = ''
+      begin
+        result, pgpi_log = with_pgpi("--deny-client-ssl") do
+          do_test_query('postgresql://frodo:friend@localhost:54321/frodo?sslmode=require&channel_binding=disable')
+        end
+      rescue => e
+        err_msg = e.message
+      end
+      contains(err_msg, 'server does not support SSL, but SSL was required')
+    end
+
+    do_test("--deny-client-ssl fails when channel binding is offered") do
+      err_msg = ''
+      begin
+        result, pgpi_log = with_pgpi("--deny-client-ssl") do
+          do_test_query('postgresql://frodo:friend@localhost:54321/frodo')
+        end
+      rescue => e
+        err_msg = e.message
+      end
+      contains(err_msg, 'server offered SCRAM-SHA-256-PLUS authentication over a non-SSL connection')
+    end
+
+    do_test("--deny-client-ssl succeeds with --override-auth") do
+      result, pgpi_log = with_pgpi("--deny-client-ssl --override-auth") do
+        do_test_query('postgresql://frodo:friend@localhost:54321/frodo')
+      end
+      result && contains(pgpi_log, 'script -> client: "N" = SSL not supported')
     end
 
   end

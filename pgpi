@@ -900,7 +900,7 @@ loop do
         messages = server_reader.available_messages { |str| puts server_to_client(str) if log_proxied }
         raise ServerEOFException.new if messages.nil?
         bytes_sent = pg_send(client_sock, messages)
-        puts "^^ #{bytes_sent} bytes forwarded at +#{(t_now - t0).floor(2)}s, #{server_reader.buffer.length} bytes left in buffer" if log_proxied
+        puts "^^ #{bytes_sent} bytes forwarded #{BYTE_WRITE ? 'one by one ' : ''}at +#{(t_now - t0).floor(2)}s, #{server_reader.buffer.length} bytes left in buffer" if log_proxied
       end
     end
     thread.abort_on_exception = true
@@ -910,7 +910,7 @@ loop do
       messages = client_reader.available_messages { |str| puts client_to_server(str) if log_proxied }
       raise ClientEOFException.new if messages.nil?
       bytes_sent = pg_send(server_sock, messages)
-      puts "^^ #{bytes_sent} bytes forwarded at +#{(t_now - t0).floor(2)}s, #{client_reader.buffer.length} bytes left in buffer" if log_proxied
+      puts "^^ #{bytes_sent} bytes forwarded #{BYTE_WRITE ? 'one by one ' : ''}at +#{(t_now - t0).floor(2)}s, #{client_reader.buffer.length} bytes left in buffer" if log_proxied
     end
 
   rescue ServerEOFException

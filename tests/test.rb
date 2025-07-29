@@ -97,6 +97,12 @@ ensure
   puts "#{failed ? "\033[31mFAIL" : "\033[32mPASS"}\033[0m  \033[1m#{desc}\033[0m"
 end
 
+def contains(haystack, needle, expected = true)
+  return true if haystack.include?(needle) == expected
+  puts haystack
+  false
+end
+
 begin
   with_postgres do
 
@@ -139,58 +145,66 @@ begin
       result, pgpi_log = with_pgpi("--ssl-negotiation postgres") do
         do_test_query('postgresql://frodo:friend@localhost:54321/frodo?sslmode=require&channel_binding=disable')
       end
-      result && !pgpi_log.include?("direct TLSv1.3/TLS_AES_256_GCM_SHA384 connection established with server")
+      result && contains(pgpi_log, "direct TLSv1.3/TLS_AES_256_GCM_SHA384 connection established with server", false)
     end
 
     do_test("--ssl-negotiation direct") do
       result, pgpi_log = with_pgpi("--ssl-negotiation direct") do
         do_test_query('postgresql://frodo:friend@localhost:54321/frodo?sslmode=require&channel_binding=disable')
       end
-      result && pgpi_log.include?("direct TLSv1.3/TLS_AES_256_GCM_SHA384 connection established with server")
+      result && contains(pgpi_log, "direct TLSv1.3/TLS_AES_256_GCM_SHA384 connection established with server")
     end
 
     do_test("--ssl-negotiation mimic (postgres)") do
       result, pgpi_log = with_pgpi do
         do_test_query('postgresql://frodo:friend@localhost:54321/frodo?sslmode=require&channel_binding=disable&sslnegotiation=postgres')
       end
-      result && !pgpi_log.include?("direct TLSv1.3/TLS_AES_256_GCM_SHA384 connection established with server")
+      result && contains(pgpi_log, "direct TLSv1.3/TLS_AES_256_GCM_SHA384 connection established with server", false)
     end
 
     do_test("--ssl-negotiation mimic (direct)") do
       result, pgpi_log = with_pgpi do
         do_test_query('postgresql://frodo:friend@localhost:54321/frodo?sslmode=require&channel_binding=disable&sslnegotiation=direct')
       end
-      result && pgpi_log.include?("direct TLSv1.3/TLS_AES_256_GCM_SHA384 connection established with server")
+      result && contains(pgpi_log, "direct TLSv1.3/TLS_AES_256_GCM_SHA384 connection established with server")
     end
 
     do_test("--override-auth (SCRAM-SHA-256)") do
       result, pgpi_log = with_pgpi("--override-auth") do
         do_test_query('postgresql://frodo:friend@localhost:54321/frodo?sslmode=require&channel_binding=disable')
       end
-      result && pgpi_log.include?('now overriding authentication' + "\n" +
-                                  'server -> script: "R" = Authentication "\x00\x00\x00\x2a" = 42 bytes "\x00\x00\x00\x0a" = AuthenticationSASL')
+      result && contains(pgpi_log, 'now overriding authentication' + "\n" +
+                                   'server -> script: "R" = Authentication "\x00\x00\x00\x2a" = 42 bytes "\x00\x00\x00\x0a" = AuthenticationSASL')
     end
 
     do_test("--override-auth + password logging") do
       result, pgpi_log = with_pgpi("--override-auth") do
         do_test_query('postgresql://frodo:friend@localhost:54321/frodo?sslmode=require&channel_binding=disable')
       end
-      result && pgpi_log.include?('client -> script: "p" = PasswordMessage (cleartext) "\x00\x00\x00\x0b" = 11 bytes "friend\x00" = password')
+      result && contains(pgpi_log, 'client -> script: "p" = PasswordMessage (cleartext) "\x00\x00\x00\x0b" = 11 bytes "friend\x00" = password')
     end
 
     do_test("--override-auth + --redact-passwords") do
       result, pgpi_log = with_pgpi("--override-auth --redact-passwords") do
         do_test_query('postgresql://frodo:friend@localhost:54321/frodo?sslmode=require&channel_binding=disable')
       end
-      result && pgpi_log.include?('client -> script: "p" = PasswordMessage (cleartext) "\x00\x00\x00\x0b" = 11 bytes [redacted] = password')
+      result && contains(pgpi_log, 'client -> script: "p" = PasswordMessage (cleartext) "\x00\x00\x00\x0b" = 11 bytes [redacted] = password')
     end
 
     do_test("--override-auth + --redact-passwords + --log-forwarded raw") do
       result, pgpi_log = with_pgpi("--override-auth --redact-passwords --log-forwarded raw") do
         do_test_query('postgresql://frodo:friend@localhost:54321/frodo?sslmode=require&channel_binding=disable')
       end
-      result && pgpi_log.include?('client -> script: [password message redacted]' + "\n" +
-                                  'script -> server: [password message redacted]')
+      result && contains(pgpi_log, 'client -> script: [password message redacted]' + "\n" +
+                                   'script -> server: [password message redacted]')
+    end
+
+    do_test("--send-chunking byte") do
+      result, pgpi_log = with_pgpi("--send-chunking byte") do
+        do_test_query('postgresql://frodo:friend@localhost:54321/frodo?sslmode=require&channel_binding=disable')
+      end
+      # would be nice to actually test byte-by-byte sending here, but for now let's just check output
+      result && contains(pgpi_log, 'bytes forwarded one by one at')
     end
 
   end
@@ -202,16 +216,16 @@ begin
       result, pgpi_log = with_pgpi do
         do_test_query('postgresql://frodo:friend@localhost:54321/frodo?sslmode=require')
       end
-      result && pgpi_log.include?('forwarding all later traffic' + "\n" +
-                                  'server -> client: "R" = Authentication "\x00\x00\x00\x08" = 8 bytes "\x00\x00\x00\x00" = AuthenticationOk')
+      result && contains(pgpi_log, 'forwarding all later traffic' + "\n" +
+                                   'server -> client: "R" = Authentication "\x00\x00\x00\x08" = 8 bytes "\x00\x00\x00\x00" = AuthenticationOk')
     end
 
     do_test("--override-auth + trust auth") do
       result, pgpi_log = with_pgpi("--override-auth") do
         do_test_query('postgresql://frodo:friend@localhost:54321/frodo?sslmode=require')
       end
-      result && pgpi_log.include?('now overriding authentication' + "\n" +
-                                  'server -> script: "R" = Authentication "\x00\x00\x00\x08" = 8 bytes "\x00\x00\x00\x00" = AuthenticationOk')
+      result && contains(pgpi_log, 'now overriding authentication' + "\n" +
+                                   'server -> script: "R" = Authentication "\x00\x00\x00\x08" = 8 bytes "\x00\x00\x00\x00" = AuthenticationOk')
     end
   end
 
@@ -220,31 +234,31 @@ begin
       result, pgpi_log = with_pgpi do
         do_test_query('postgresql://frodo:friend@localhost:54321/frodo?sslmode=require')
       end
-      result && pgpi_log.include?('forwarding all later traffic' + "\n" +
-                                  'server -> client: "R" = Authentication "\x00\x00\x00\x08" = 8 bytes "\x00\x00\x00\x03" = AuthenticationCleartextPassword')
+      result && contains(pgpi_log, 'forwarding all later traffic' + "\n" +
+                                   'server -> client: "R" = Authentication "\x00\x00\x00\x08" = 8 bytes "\x00\x00\x00\x03" = AuthenticationCleartextPassword')
     end
 
     do_test("--redact-passwords + cleartext password auth") do
       result, pgpi_log = with_pgpi("--redact-passwords") do
         do_test_query('postgresql://frodo:friend@localhost:54321/frodo?sslmode=require')
       end
-      result && pgpi_log.include?('client -> server: "p" = PasswordMessage (cleartext) "\x00\x00\x00\x0b" = 11 bytes [redacted] = password')
+      result && contains(pgpi_log, 'client -> server: "p" = PasswordMessage (cleartext) "\x00\x00\x00\x0b" = 11 bytes [redacted] = password')
     end
 
     do_test("--override-auth + cleartext password auth") do
       result, pgpi_log = with_pgpi("--override-auth") do
         do_test_query('postgresql://frodo:friend@localhost:54321/frodo?sslmode=require')
       end
-      result && pgpi_log.include?('now overriding authentication' + "\n" +
-                                  'server -> script: "R" = Authentication "\x00\x00\x00\x08" = 8 bytes "\x00\x00\x00\x03" = AuthenticationCleartextPassword')
+      result && contains(pgpi_log, 'now overriding authentication' + "\n" +
+                                   'server -> script: "R" = Authentication "\x00\x00\x00\x08" = 8 bytes "\x00\x00\x00\x03" = AuthenticationCleartextPassword')
     end
 
     do_test("--override-auth + --redact-passwords + cleartext password auth") do
       result, pgpi_log = with_pgpi("--override-auth --redact-passwords") do
         do_test_query('postgresql://frodo:friend@localhost:54321/frodo?sslmode=require')
       end
-      result && pgpi_log.include?('client -> script: "p" = PasswordMessage (cleartext) "\x00\x00\x00\x0b" = 11 bytes [redacted] = password' + "\n" +
-                                  'script -> server: "p" = PasswordMessage (cleartext) "\x00\x00\x00\x0b" = 11 bytes [redacted] = password')
+      result && contains(pgpi_log, 'client -> script: "p" = PasswordMessage (cleartext) "\x00\x00\x00\x0b" = 11 bytes [redacted] = password' + "\n" +
+                                   'script -> server: "p" = PasswordMessage (cleartext) "\x00\x00\x00\x0b" = 11 bytes [redacted] = password')
     end
   end
 
@@ -253,16 +267,16 @@ begin
       result, pgpi_log = with_pgpi do
         do_test_query('postgresql://frodo:friend@localhost:54321/frodo?sslmode=require')
       end
-      result && pgpi_log.include?('forwarding all later traffic' + "\n" +
-                                  'server -> client: "R" = Authentication "\x00\x00\x00\x0c" = 12 bytes "\x00\x00\x00\x05" = AuthenticationMD5Password')
+      result && contains(pgpi_log, 'forwarding all later traffic' + "\n" +
+                                   'server -> client: "R" = Authentication "\x00\x00\x00\x0c" = 12 bytes "\x00\x00\x00\x05" = AuthenticationMD5Password')
     end
 
     do_test("--override-auth + MD5 auth") do
       result, pgpi_log = with_pgpi("--override-auth") do
         do_test_query('postgresql://frodo:friend@localhost:54321/frodo?sslmode=require')
       end
-      result && pgpi_log.include?('now overriding authentication' + "\n" +
-                                  'server -> script: "R" = Authentication "\x00\x00\x00\x0c" = 12 bytes "\x00\x00\x00\x05" = AuthenticationMD5Password')
+      result && contains(pgpi_log, 'now overriding authentication' + "\n" +
+                                   'server -> script: "R" = Authentication "\x00\x00\x00\x0c" = 12 bytes "\x00\x00\x00\x05" = AuthenticationMD5Password')
     end
   end
 

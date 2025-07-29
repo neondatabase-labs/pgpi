@@ -106,7 +106,7 @@ end
 begin
   with_postgres do
 
-    do_test("make a connection") do
+    do_test("basic connection") do
       result, pgpi_log = with_pgpi do
         do_test_query('postgresql://frodo:friend@localhost:54321/frodo?sslmode=require&channel_binding=disable')
       end
@@ -155,21 +155,21 @@ begin
       result && contains(pgpi_log, "direct TLSv1.3/TLS_AES_256_GCM_SHA384 connection established with server")
     end
 
-    do_test("--ssl-negotiation mimic (postgres)") do
+    do_test("--ssl-negotiation mimic, where client uses Postgres SSL negotiation") do
       result, pgpi_log = with_pgpi do
         do_test_query('postgresql://frodo:friend@localhost:54321/frodo?sslmode=require&channel_binding=disable&sslnegotiation=postgres')
       end
       result && contains(pgpi_log, "direct TLSv1.3/TLS_AES_256_GCM_SHA384 connection established with server", false)
     end
 
-    do_test("--ssl-negotiation mimic (direct)") do
+    do_test("--ssl-negotiation mimic, where client uses direct SSL connection") do
       result, pgpi_log = with_pgpi do
         do_test_query('postgresql://frodo:friend@localhost:54321/frodo?sslmode=require&channel_binding=disable&sslnegotiation=direct')
       end
       result && contains(pgpi_log, "direct TLSv1.3/TLS_AES_256_GCM_SHA384 connection established with server")
     end
 
-    do_test("--override-auth (SCRAM-SHA-256)") do
+    do_test("--override-auth using SCRAM-SHA-256") do
       result, pgpi_log = with_pgpi("--override-auth") do
         do_test_query('postgresql://frodo:friend@localhost:54321/frodo?sslmode=require&channel_binding=disable')
       end
@@ -177,21 +177,21 @@ begin
                                    'server -> script: "R" = Authentication "\x00\x00\x00\x2a" = 42 bytes "\x00\x00\x00\x0a" = AuthenticationSASL')
     end
 
-    do_test("--override-auth + password logging") do
+    do_test("--override-auth logs password") do
       result, pgpi_log = with_pgpi("--override-auth") do
         do_test_query('postgresql://frodo:friend@localhost:54321/frodo?sslmode=require&channel_binding=disable')
       end
       result && contains(pgpi_log, 'client -> script: "p" = PasswordMessage (cleartext) "\x00\x00\x00\x0b" = 11 bytes "friend\x00" = password')
     end
 
-    do_test("--override-auth + --redact-passwords") do
+    do_test("--override-auth with --redact-passwords") do
       result, pgpi_log = with_pgpi("--override-auth --redact-passwords") do
         do_test_query('postgresql://frodo:friend@localhost:54321/frodo?sslmode=require&channel_binding=disable')
       end
       result && contains(pgpi_log, 'client -> script: "p" = PasswordMessage (cleartext) "\x00\x00\x00\x0b" = 11 bytes [redacted] = password')
     end
 
-    do_test("--override-auth + --redact-passwords + --log-forwarded raw") do
+    do_test("--override-auth with --redact-passwords and --log-forwarded raw") do
       result, pgpi_log = with_pgpi("--override-auth --redact-passwords --log-forwarded raw") do
         do_test_query('postgresql://frodo:friend@localhost:54321/frodo?sslmode=require&channel_binding=disable')
       end
@@ -203,8 +203,23 @@ begin
       result, pgpi_log = with_pgpi("--send-chunking byte") do
         do_test_query('postgresql://frodo:friend@localhost:54321/frodo?sslmode=require&channel_binding=disable')
       end
-      # would be nice to actually test byte-by-byte sending here, but for now let's just check output
+      # would be nice to actually test byte-by-byte sending here, but for now let's just check log output
       result && contains(pgpi_log, 'bytes forwarded one by one at')
+    end
+
+    do_test("--ssl-cert and --ssl-key matching server to enable channel binding)") do
+      result, pgpi_log = with_pgpi("--ssl-cert /tmp/client.cer --ssl-key /tmp/client.key") do
+        do_test_query('postgresql://frodo:friend@localhost:54321/frodo?sslmode=require&channel_binding=require')
+      end
+      result && contains(pgpi_log, 'client -> server: "p" = SASLInitialResponse "\x00\x00\x00\x50" = 80 bytes' + "\n" +
+                                   '  "SCRAM-SHA-256-PLUS\x00" = selected mechanism')
+    end
+
+    do_test("ECDSA generated cert") do
+      result, pgpi_log = with_pgpi("--cert-sig ecdsa") do
+        do_test_query('postgresql://frodo:friend@localhost:54321/frodo?sslmode=require&channel_binding=disable')
+      end
+      result && contains(pgpi_log, 'xxx')
     end
 
   end

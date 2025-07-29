@@ -323,6 +323,34 @@ Dir.mktmpdir('pgpi-tests') do |tmpdir|
         contains(err_msg, 'Connection refused')
       end
 
+      do_test("SSLKEYLOGFILE writing") do
+        cslf = File.join(TMPDIR, 'client-sslkeylogfile')
+        sslf = File.join(TMPDIR, 'server-sslkeylogfile')
+        result, _ = with_pgpi("--client-sslkeylogfile #{cslf} --server-sslkeylogfile #{sslf}") do
+          do_test_query('postgresql://frodo:friend@localhost:54321/frodo?sslmode=require&channel_binding=disable')
+        end
+        cslf_contents = File.read(cslf)
+        sslf_contents = File.read(sslf)
+        result && contains(cslf_contents, 'SERVER_HANDSHAKE_TRAFFIC_SECRET') && contains(sslf_contents, 'SERVER_HANDSHAKE_TRAFFIC_SECRET')
+      end
+
+      do_test("monochrome output") do
+        result, pgpi_log = with_pgpi("--bw") do
+          do_test_query('postgresql://frodo:friend@localhost:54321/frodo?sslmode=require&channel_binding=disable')
+        end
+        result && contains(pgpi_log, 'script -> client: "S" = SSL supported')
+      end
+
+      do_test("colour output") do
+        result, pgpi_log = with_pgpi("--no-bw") do
+          do_test_query('postgresql://frodo:friend@localhost:54321/frodo?sslmode=require&channel_binding=disable')
+        end
+        result && contains(pgpi_log, "\e[35mscript -> client:\e[0m \"S\"\e[33m = SSL supported\e[0m")
+      end
+
+      # TODO
+      # test COPY command parsing, INSERT, UPDATE, etc.
+      # test replication, server - server
     end
 
     # additional --override-auth tests

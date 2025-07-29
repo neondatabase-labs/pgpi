@@ -281,6 +281,16 @@ If using Wireshark, you might also want to specify `--log-forwarded none`.
 * The Postgres protocol has some [helpful documentation](https://www.postgresql.org/docs/current/protocol.html).
 
 
+### Tests
+
+To tun tests, clone this repo and from the root directory:
+
+* Ensure Docker is installed and running
+* Get the `pg` gem: `gem install pg`
+* Run `ruby tests/test.rb`
+* Or to see OpenSSL and Docker output alongside test results: `ruby tests/test.rb --verbose`
+
+
 ### License
 
 `pgpi` is released under the [Apache-2.0 license](LICENSE).

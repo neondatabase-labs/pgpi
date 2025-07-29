@@ -216,7 +216,7 @@ begin
                                    '  "SCRAM-SHA-256-PLUS\x00" = selected mechanism')
     end
 
-    do_test("--log-certs and RSA generated cert") do
+    do_test("--log-certs with RSA generated cert") do
       result, pgpi_log = with_pgpi("--log-certs") do
         do_test_query('postgresql://frodo:friend@localhost:54321/frodo?sslmode=require&channel_binding=disable')
       end
@@ -226,7 +226,7 @@ begin
                                    '                Public-Key: (2048 bit)')
     end
 
-    do_test("--log-certs and ECDSA generated cert") do
+    do_test("--log-certs with ECDSA generated cert") do
       result, pgpi_log = with_pgpi("--log-certs --cert-sig ecdsa") do
         do_test_query('postgresql://frodo:friend@localhost:54321/frodo?sslmode=require&channel_binding=disable')
       end
@@ -239,7 +239,7 @@ begin
     do_test("--deny-client-ssl causes connection error with sslmode=require") do
       err_msg = ''
       begin
-        result, pgpi_log = with_pgpi("--deny-client-ssl") do
+        with_pgpi("--deny-client-ssl") do
           do_test_query('postgresql://frodo:friend@localhost:54321/frodo?sslmode=require&channel_binding=disable')
         end
       rescue => e
@@ -251,7 +251,7 @@ begin
     do_test("--deny-client-ssl fails when channel binding is offered") do
       err_msg = ''
       begin
-        result, pgpi_log = with_pgpi("--deny-client-ssl") do
+        with_pgpi("--deny-client-ssl") do
           do_test_query('postgresql://frodo:friend@localhost:54321/frodo')
         end
       rescue => e
@@ -265,6 +265,52 @@ begin
         do_test_query('postgresql://frodo:friend@localhost:54321/frodo')
       end
       result && contains(pgpi_log, 'script -> client: "N" = SSL not supported')
+    end
+
+    do_test("annotated logging of forwarded traffic") do
+      result, pgpi_log = with_pgpi do
+        do_test_query('postgresql://frodo:friend@localhost:54321/frodo?sslmode=require&channel_binding=disable')
+      end
+      result && contains(pgpi_log, 'server -> client: "Z" = ReadyForQuery "\x00\x00\x00\x05" = 5 bytes "I" = idle')
+    end
+
+    do_test("raw logging of forwarded traffic") do
+      result, pgpi_log = with_pgpi("--log-forwarded raw") do
+        do_test_query('postgresql://frodo:friend@localhost:54321/frodo?sslmode=require&channel_binding=disable')
+      end
+      result && contains(pgpi_log, 'forwarding all later traffic') &&
+        contains(pgpi_log, 'server -> client: "Z\x00\x00\x00\x05I"')
+    end
+
+    do_test("no logging of forwarded traffic") do
+      result, pgpi_log = with_pgpi("--log-forwarded none") do
+        do_test_query('postgresql://frodo:friend@localhost:54321/frodo?sslmode=require&channel_binding=disable')
+      end
+      result && contains(pgpi_log, 'silently forwarding all later traffic') &&
+        contains(pgpi_log, 'server -> client: "Z" = ReadyForQuery "\x00\x00\x00\x05" = 5 bytes "I" = idle', false) &&
+        contains(pgpi_log, 'server -> client: "Z\x00\x00\x00\x05I"', false)
+    end
+
+    do_test("support multiple connections") do
+      result, _ = with_pgpi do
+        do_test_query('postgresql://frodo:friend@localhost:54321/frodo?sslmode=require&channel_binding=disable')
+        do_test_query('postgresql://frodo:friend@localhost:54321/frodo?sslmode=require&channel_binding=disable')
+        do_test_query('postgresql://frodo:friend@localhost:54321/frodo?sslmode=require&channel_binding=disable')
+      end
+      result
+    end
+
+    do_test("support only the socket-testing connection with --quit-on-hangup") do
+      err_msg = ''
+      begin
+        with_pgpi("--quit-on-hangup") do
+          # we already connected once to check the socket is open, so this next connection should fail
+          do_test_query('postgresql://frodo:friend@localhost:54321/frodo?sslmode=require&channel_binding=disable')
+        end
+      rescue => e
+        err_msg = e.message
+      end
+      contains(err_msg, 'Connection refused')
     end
 
   end

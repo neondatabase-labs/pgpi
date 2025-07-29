@@ -2,12 +2,16 @@ require 'pg'
 require 'socket'
 require 'timeout'
 
+QUIET = ARGV[0] != "--verbose"
+$redir = QUIET ? '> /dev/null 2>&1' : ''
+$spawn_opts = QUIET ? { :err => File::NULL, :out => File::NULL } : {}
+
 puts '>> Generating TLS cert ...'
-`openssl req -quiet -new -newkey rsa:4096 -nodes -out /tmp/ca.csr -keyout /tmp/ca.key -subj "/OU=Unknown/O=Unknown/L=Unknown/ST=Unknown/C=GB"
-openssl x509 -trustout -signkey /tmp/ca.key -days 2 -req -in /tmp/ca.csr -out /tmp/ca.pem
-openssl genrsa -out /tmp/client.key 4096
-openssl req -quiet -new -key /tmp/client.key -out /tmp/client.csr -sha256 -subj "/OU=Unknown/O=Unknown/L=Unknown/ST=Unknown/C=GB"
-openssl x509 -req -days 365 -in /tmp/client.csr -CA /tmp/ca.pem -CAkey /tmp/ca.key -out /tmp/client.cer`
+`openssl req -new -newkey rsa:4096 -nodes -out /tmp/ca.csr -keyout /tmp/ca.key -subj "/OU=Unknown/O=Unknown/L=Unknown/ST=Unknown/C=GB" #{$redir}
+openssl x509 -trustout -signkey /tmp/ca.key -days 2 -req -in /tmp/ca.csr -out /tmp/ca.pem #{$redir}
+openssl genrsa -out /tmp/client.key 4096 #{$redir}
+openssl req -quiet -new -key /tmp/client.key -out /tmp/client.csr -sha256 -subj "/OU=Unknown/O=Unknown/L=Unknown/ST=Unknown/C=GB" #{$redir}
+openssl x509 -req -days 365 -in /tmp/client.csr -CA /tmp/ca.pem -CAkey /tmp/ca.key -out /tmp/client.cer #{$redir}`
 
 def await_port(port)
   Timeout::timeout(30) do
@@ -32,7 +36,7 @@ def with_postgres(auth_method = 'scram-sha-256', port = 54320)
     postgres:17 \
     -c ssl=on \
     -c ssl_cert_file=/tmp/client.cer \
-    -c ssl_key_file=/tmp/client.key", :err => File::NULL, :out => File::NULL)
+    -c ssl_key_file=/tmp/client.key", **$spawn_opts)
 
   await_port(port)
   sleep 1 # for additional setup tasks to complete

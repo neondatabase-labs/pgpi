@@ -57,13 +57,17 @@ def with_pgpi(args = '', listen_port = 54321, connect_port = 54320)
   block_result = yield
 
   Process.kill('SIGTERM', pgpi_pipe.pid)
+  Process.wait(pgpi_pipe.pid)
   killed = true
   pgpi_log = pgpi_pipe.read
   pgpi_pipe.close
   [block_result, pgpi_log]
 
 ensure
-  Process.kill('SIGTERM', pgpi_pipe.pid) unless killed
+  unless killed
+    Process.kill('SIGTERM', pgpi_pipe.pid)
+    Process.wait(pgpi_pipe.pid)
+  end
 end
 
 def do_test_query(connection_string)
@@ -94,8 +98,6 @@ ensure
 end
 
 begin
-
-  # === start tests ===
   with_postgres do
 
     do_test("make a connection") do
@@ -169,12 +171,42 @@ begin
                                   'server -> script: "R" = Authentication "\x00\x00\x00\x2a" = 42 bytes "\x00\x00\x00\x0a" = AuthenticationSASL')
     end
 
+    do_test("--override-auth + password logging") do
+      result, pgpi_log = with_pgpi("--override-auth") do
+        do_test_query('postgresql://frodo:friend@localhost:54321/frodo?sslmode=require&channel_binding=disable')
+      end
+      result && pgpi_log.include?('client -> script: "p" = PasswordMessage (cleartext) "\x00\x00\x00\x0b" = 11 bytes "friend\x00" = password')
+    end
+
+    do_test("--override-auth + --redact-passwords") do
+      result, pgpi_log = with_pgpi("--override-auth --redact-passwords") do
+        do_test_query('postgresql://frodo:friend@localhost:54321/frodo?sslmode=require&channel_binding=disable')
+      end
+      result && pgpi_log.include?('client -> script: "p" = PasswordMessage (cleartext) "\x00\x00\x00\x0b" = 11 bytes [redacted] = password')
+    end
+
+    do_test("--override-auth + --redact-passwords + --log-forwarded raw") do
+      result, pgpi_log = with_pgpi("--override-auth --redact-passwords --log-forwarded raw") do
+        do_test_query('postgresql://frodo:friend@localhost:54321/frodo?sslmode=require&channel_binding=disable')
+      end
+      result && pgpi_log.include?('client -> script: [password message redacted]' + "\n" +
+                                  'script -> server: [password message redacted]')
+    end
+
   end
 
   # additional --override-auth tests
 
   with_postgres('trust') do
-    do_test("--override-auth (trust)") do
+    do_test("trust auth") do
+      result, pgpi_log = with_pgpi do
+        do_test_query('postgresql://frodo:friend@localhost:54321/frodo?sslmode=require')
+      end
+      result && pgpi_log.include?('forwarding all later traffic' + "\n" +
+                                  'server -> client: "R" = Authentication "\x00\x00\x00\x08" = 8 bytes "\x00\x00\x00\x00" = AuthenticationOk')
+    end
+
+    do_test("--override-auth + trust auth") do
       result, pgpi_log = with_pgpi("--override-auth") do
         do_test_query('postgresql://frodo:friend@localhost:54321/frodo?sslmode=require')
       end
@@ -184,17 +216,48 @@ begin
   end
 
   with_postgres('password') do
-    do_test("--override-auth (cleartext password)") do
+    do_test("cleartext password auth") do
+      result, pgpi_log = with_pgpi do
+        do_test_query('postgresql://frodo:friend@localhost:54321/frodo?sslmode=require')
+      end
+      result && pgpi_log.include?('forwarding all later traffic' + "\n" +
+                                  'server -> client: "R" = Authentication "\x00\x00\x00\x08" = 8 bytes "\x00\x00\x00\x03" = AuthenticationCleartextPassword')
+    end
+
+    do_test("--redact-passwords + cleartext password auth") do
+      result, pgpi_log = with_pgpi("--redact-passwords") do
+        do_test_query('postgresql://frodo:friend@localhost:54321/frodo?sslmode=require')
+      end
+      result && pgpi_log.include?('client -> server: "p" = PasswordMessage (cleartext) "\x00\x00\x00\x0b" = 11 bytes [redacted] = password')
+    end
+
+    do_test("--override-auth + cleartext password auth") do
       result, pgpi_log = with_pgpi("--override-auth") do
         do_test_query('postgresql://frodo:friend@localhost:54321/frodo?sslmode=require')
       end
       result && pgpi_log.include?('now overriding authentication' + "\n" +
                                   'server -> script: "R" = Authentication "\x00\x00\x00\x08" = 8 bytes "\x00\x00\x00\x03" = AuthenticationCleartextPassword')
     end
+
+    do_test("--override-auth + --redact-passwords + cleartext password auth") do
+      result, pgpi_log = with_pgpi("--override-auth --redact-passwords") do
+        do_test_query('postgresql://frodo:friend@localhost:54321/frodo?sslmode=require')
+      end
+      result && pgpi_log.include?('client -> script: "p" = PasswordMessage (cleartext) "\x00\x00\x00\x0b" = 11 bytes [redacted] = password' + "\n" +
+                                  'script -> server: "p" = PasswordMessage (cleartext) "\x00\x00\x00\x0b" = 11 bytes [redacted] = password')
+    end
   end
 
   with_postgres('md5') do
-    do_test("--override-auth (MD5)") do
+    do_test("MD5 auth") do
+      result, pgpi_log = with_pgpi do
+        do_test_query('postgresql://frodo:friend@localhost:54321/frodo?sslmode=require')
+      end
+      result && pgpi_log.include?('forwarding all later traffic' + "\n" +
+                                  'server -> client: "R" = Authentication "\x00\x00\x00\x0c" = 12 bytes "\x00\x00\x00\x05" = AuthenticationMD5Password')
+    end
+
+    do_test("--override-auth + MD5 auth") do
       result, pgpi_log = with_pgpi("--override-auth") do
         do_test_query('postgresql://frodo:friend@localhost:54321/frodo?sslmode=require')
       end

@@ -364,6 +364,15 @@ Dir.mktmpdir('pgpi-tests') do |tmpdir|
         result && contains(pgpi_log, "\e[35mscript -> client:\e[0m \"S\"\e[33m = SSL supported\e[0m")
       end
 
+      do_test("DDL query") do
+        results, _ = with_pgpi do
+          PG.connect('postgresql://frodo:friend@localhost:54321/frodo?sslmode=require&channel_binding=disable') do |conn|
+            conn.exec("CREATE TABLE names (id serial primary key, name text)")
+          end
+        end
+        results.cmd_status == "CREATE TABLE"
+      end
+
       # TODO
       # test COPY command parsing, INSERT, UPDATE, etc.
       # test replication, server - server

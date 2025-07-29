@@ -210,6 +210,22 @@ Dir.mktmpdir('pgpi-tests') do |tmpdir|
                                      'script -> server: [password message redacted]')
       end
 
+      do_test("--override-auth with channel binding") do
+        result, pgpi_log = with_pgpi("--override-auth") do
+          do_test_query('postgresql://frodo:friend@localhost:54321/frodo?sslmode=require&channel_binding=disable')
+        end
+        result && contains(pgpi_log, 'script -> server: "p" = SASLInitialResponse "\x00\x00\x00\x65" = 101 bytes' + "\n" +
+                                     '  "SCRAM-SHA-256-PLUS\x00" = selected mechanism')
+      end
+
+      do_test("--override-auth with no channel binding") do
+        result, pgpi_log = with_pgpi("--override-auth --no-channel-binding") do
+          do_test_query('postgresql://frodo:friend@localhost:54321/frodo?sslmode=require&channel_binding=disable')
+        end
+        result && contains(pgpi_log, 'script -> server: "p" = SASLInitialResponse "\x00\x00\x00\x4b" = 75 bytes' + "\n" +
+                                     '  "SCRAM-SHA-256\x00" = selected mechanism')
+      end
+
       do_test("--send-chunking byte") do
         result, pgpi_log = with_pgpi("--send-chunking byte") do
           do_test_query('postgresql://frodo:friend@localhost:54321/frodo?sslmode=require&channel_binding=disable')

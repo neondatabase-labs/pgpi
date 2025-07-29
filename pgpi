@@ -42,6 +42,7 @@ options = { # set defaults
   server_sslkeylogfile: nil,
   bw: nil,
   quit_on_hangup: false,
+  channel_binding: true,
 }
 
 OptionParser.new do |opts|
@@ -58,6 +59,8 @@ OptionParser.new do |opts|
           "SSL negotiation style: mimic client, direct or traditional Postgres (default: #{options[:ssl_negotiation]})") { |v| options[:ssl_negotiation] = v }
   opts.on("--[no-]override-auth",
           "Require password auth from client, do SASL/MD5/password auth with server (default: #{options[:force_password]})") { |v| options[:force_password] = v }
+  opts.on("--[no-]channel-binding",
+          "Enable channel binding for SASL connection to server with --override-auth (default: #{options[:channel_binding]})") { |v| options[:channel_binding] = v }
   opts.on("--[no-]redact-passwords",
           "Redact password messages in logs (default: #{options[:redact_passwords]})") { |v| options[:redact_passwords] = v }
   opts.on("--send-chunking whole|byte", ["whole", "byte"],
@@ -858,14 +861,14 @@ loop do
             exit 1
           end
           authenticators = { # highest preference first
-            "SCRAM-SHA-256-PLUS" => ScramSHA256PlusAuthenticator,
+            **(options[:channel_binding] ? {"SCRAM-SHA-256-PLUS" => ScramSHA256PlusAuthenticator} : {}),
             "SCRAM-SHA-256" => ScramSHA256Authenticator,
           }
           offered_mechanisms = auth_msg[9..].split("\x00")
           mechanism = (authenticators.keys & offered_mechanisms).first
           raise "no supported SASL mechanism: support #{authenticators.keys.inspect}, offered #{offered_mechanisms.inspect}" if mechanism.nil?
 
-          auth = authenticators[mechanism].new(username: "*", password: pwd, ssl_cert: server_sock.peer_cert)
+          auth = authenticators[mechanism].new(username: "*", password: pwd, ssl_cert: options[:channel_binding] ? server_sock.peer_cert : nil)
           client_initial_msg = auth.process(nil)
           scram_msg = bin_str("#{mechanism}\x00#{[client_initial_msg.length].pack("N")}#{client_initial_msg}")
           pg_send(server_sock, [pg_msg("p", scram_msg)], :client) { |str| puts script_to_server(str) }

@@ -158,6 +158,7 @@ Usage: pgpi [options]
         --ssl-negotiation mimic|direct|postgres
                                      SSL negotiation style: mimic client, direct or traditional Postgres (default: mimic)
         --[no-]override-auth         Require password auth from client, do SASL/MD5/password auth with server (default: false)
+        --[no-]channel-binding       Enable channel binding for SASL connection to server with --override-auth (default: true)
         --[no-]redact-passwords      Redact password messages in logs (default: false)
         --send-chunking whole|byte   Chunk size for sending Postgres data (default: whole)
         --ssl-cert /path/to/cert     TLS certificate for connection with client (default: generated, self-signed)

@@ -124,28 +124,28 @@ Dir.mktmpdir('pgpi-tests') do |tmpdir|
         result
       end
 
-      do_test("strip .localtest.me") do
+      do_test("strip .local.neon.build") do
         result, _ = with_pgpi do
+          do_test_query('postgresql://frodo:friend@localhost.local.neon.build:54321/frodo?sslmode=require&channel_binding=disable')
+        end
+        result
+      end
+
+      do_test("strip an alternative suffix") do
+        result, _ = with_pgpi("--delete-host-suffix .localtest.me") do
           do_test_query('postgresql://frodo:friend@localhost.localtest.me:54321/frodo?sslmode=require&channel_binding=disable')
         end
         result
       end
 
-      do_test("--delete-host-suffix") do
-        result, _ = with_pgpi("--delete-host-suffix .127-0-0-1.sslip.io") do
-          do_test_query('postgresql://frodo:friend@localhost.127-0-0-1.sslip.io:54321/frodo?sslmode=require&channel_binding=disable')
-        end
-        result
-      end
-
-      do_test("--fixed-host") do
+      do_test("specify a fixed host name") do
         result, _ = with_pgpi("--fixed-host localhost") do
-          do_test_query('postgresql://frodo:friend@imaginary.server.localtest.me:54321/frodo?sslmode=require&channel_binding=disable')
+          do_test_query('postgresql://frodo:friend@imaginary.server.local.neon.build:54321/frodo?sslmode=require&channel_binding=disable')
         end
         result
       end
 
-      do_test("--listen-port") do
+      do_test("switch the listening port") do
         result, pgpi_log = with_pgpi('', 65432) do
           do_test_query('postgresql://frodo:friend@localhost:65432/frodo?sslmode=require&channel_binding=disable')
         end

@@ -39,10 +39,10 @@ Or on any platform, simply download [the `pgpi` script](pgpi) and run it using (
 listening ...
 ```
 
-In a second terminal, connect to and query a Neon Postgres database via `pgpi` by (1) appending `.localtest.me` to the host name and (2) changing `channel_binding=require` to `channel_binding=disable`:
+In a second terminal, connect to and query a Neon Postgres database via `pgpi` by (1) appending `.local.neon.build` to the host name and (2) changing `channel_binding=require` to `channel_binding=disable`:
 
 ```bash
-% psql 'postgresql://neondb_owner:fake_password@ep-crimson-sound-a8nnh11s.eastus2.azure.neon.tech.localtest.me/neondb?sslmode=require&channel_binding=disable'
+% psql 'postgresql://neondb_owner:fake_password@ep-crimson-sound-a8nnh11s.eastus2.azure.neon.tech.local.neon.build/neondb?sslmode=require&channel_binding=disable'
 psql (17.5 (Homebrew))
 SSL connection (protocol: TLSv1.3, cipher: TLS_AES_256_GCM_SHA384, compression: off, ALPN: postgresql)
 Type "help" for help.
@@ -66,7 +66,7 @@ connected at t0 = 2025-07-04 14:28:59 +0100
 client -> script: "\x00\x00\x00\x08\x04\xd2\x16\x2f" = SSLRequest
 script -> client: "S" = SSL supported
 TLSv1.3/TLS_AES_256_GCM_SHA384 connection established with client
-  server name via SNI: ep-crimson-sound-a8nnh11s.eastus2.azure.neon.tech.localtest.me
+  server name via SNI: ep-crimson-sound-a8nnh11s.eastus2.azure.neon.tech.local.neon.build
 client -> script: "\x00\x00\x00\x56" = 86 bytes of startup message "\x00\x03\x00\x00" = protocol version
   "user\x00" = key "neondb_owner\x00" = value
   "database\x00" = key "neondb\x00" = value
@@ -152,7 +152,7 @@ https://github.com/neondatabase-labs/pgpi ++ Copyright 2025 Databricks, Inc. ++ 
 
 Usage: pgpi [options]
         --fixed-host a.bc.de         Use a fixed Postgres server hostname (default: via SNI, or 'localhost')
-        --delete-host-suffix bc.de   Delete a suffix from server hostname provided by client (default: .localtest.me)
+        --delete-host-suffix bc.de   Delete a suffix from server hostname provided by client (default: .local.neon.build)
         --listen-port nnnn           Port on which to listen for client connection (default: 5432)
         --connect-port nnnn          Port on which to connect to server (default: 5432)
         --ssl-negotiation mimic|direct|postgres
@@ -185,11 +185,11 @@ What are these options for?
 
 In many cases you’ll probably run your Postgres client and `pgpi` on the same machine, with the server on a different machine, as in the example above.
 
-When you connect your Postgres client via `pgpi` over TLS, `pgpi` uses [SNI](https://en.wikipedia.org/wiki/Server_Name_Indication) to find out what server hostname you gave the client. `pgpi` tries to forward the connection on to that same hostname, except that it first strips off the suffix `.localtest.me` if present.
+When you connect your Postgres client via `pgpi` over TLS, `pgpi` uses [SNI](https://en.wikipedia.org/wiki/Server_Name_Indication) to find out what server hostname you gave the client. `pgpi` tries to forward the connection on to that same hostname, except that it first strips off the suffix `.local.neon.build` if present.
 
-> [localtest.me](https://github.com/localtest-dot-me/localtest-dot-me.github.com) is a helpful free service where both the root and every possible subdomain — `localtest.me`, `*.localtest.me`, `*.*.localtest.me`, etc. — resolve to your local machine, `127.0.0.1`.
+> `local.neon.build` is set up such that every possible subdomain — `*.local.neon.build`, `*.*.local.neon.build`, etc. — resolves to your local machine, `127.0.0.1`.
 
-In the example, `ep-crimson-sound-a8nnh11s.eastus2.azure.neon.tech.localtest.me` is just an alias for your local machine, where `pgpi` is running. `pgpi` then turns that hostname back into the real hostname, `ep-crimson-sound-a8nnh11s.eastus2.azure.neon.tech`, for the onward connection.
+In the example, `ep-crimson-sound-a8nnh11s.eastus2.azure.neon.tech.local.neon.build` is just an alias for your local machine, where `pgpi` is running. `pgpi` then turns that hostname back into the real hostname, `ep-crimson-sound-a8nnh11s.eastus2.azure.neon.tech`, for the onward connection.
 
 It’s also possible to:
 
@@ -258,13 +258,16 @@ Use `--bw` to suppress colours in TTY output (or `--no-bw` to force colours even
 
 ### Connection options
 
-The `--ssl-negotiation direct` option tells `pgpi` to initiate a TLS connection to the server immediately, without first sending an SSLRequest message (this is a [new feature in Postgres 17+](https://www.postgresql.org/docs/current/release-17.html#RELEASE-17-LIBPQ) and saves a network round-trip). Specifying `--ssl-negotiation postgres` has the opposite effect. The default is `--ssl-negotiation mimic`, which has `pgpi` do the same thing as the client.
+The `--ssl-negotiation direct` option tells `pgpi` to initiate a TLS connection to the server immediately, without first sending an SSLRequest message (this is a [new feature in Postgres 17+](https://www.postgresql.org/docs/current/release-17.html#RELEASE-17-LIBPQ) and saves a network round-trip). Specifying `--ssl-negotiation postgres` has the opposite effect. The default is `--ssl-negotiation mimic`, which has `pgpi` do whatever the connecting client did.
 
-The `--cert-sig` option specifies the encryption type of the self-signed certificate `pgpi` generates. The default is `--cert-sig rsa`, but `--cert-sig ecdsa` is also supported.
+The `--no-channel-binding` option removes support for channel binding (SCRAM-SHA-256-PLUS) when authenticating with the server via `--override-auth`.
 
-If the `--send-chunking byte` option is given, all traffic is forwarded one single byte at a time. This is extremely inefficient, but it can smoke out software that doesn’t correctly buffer its TCP/TLS input. The default is `--send-chunking whole`, which forwards as many complete Postgres messages as are available when new data are received.
+The `--cert-sig` option specifies the encryption type of the self-signed certificate `pgpi` presents to connecting clients. The default is `--cert-sig rsa`, but `--cert-sig ecdsa` is also supported.
 
-The `--quit-on-hangup` option causes the script to exit when the Postgres connection closes, instead of listening for a new connection.
+If the `--send-chunking byte` option is given, all traffic is forwarded one single byte at a time in both directions. This is extremely inefficient, but it can smoke out software that doesn’t correctly buffer its TCP/TLS input. The default is `--send-chunking whole`, which forwards as many complete Postgres messages as are available when new data are received.
+
+The `--quit-on-hangup` option causes the script to exit when the first Postgres connection closes, instead of listening for a new connection.
+
 
 ### Using Wireshark
 

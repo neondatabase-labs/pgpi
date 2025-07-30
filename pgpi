@@ -25,7 +25,7 @@ SCRIPT_INFO = "https://github.com/neondatabase-labs/pgpi ++ Copyright 2025 Datab
 
 options = { # set defaults
   target: nil,
-  delete_host_suffix: ".localtest.me",
+  delete_host_suffix: ".local.neon.build",
   listen_port: 5432,
   connect_port: 5432,
   ssl_negotiation: "mimic",

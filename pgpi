@@ -423,7 +423,7 @@ class PgMessage
               s += annotate(paramlenr, "null")
             else
               s += annotate(paramlenr, "#{paramlenv} bytes follow")
-              _, paramr = str(v)
+              _, paramr = str(paramlenv)
               s += annotate(paramr, "parameter value")
             end
           end

@@ -367,18 +367,49 @@ Dir.mktmpdir('pgpi-tests') do |tmpdir|
       do_test("DDL query") do
         results, _ = with_pgpi do
           PG.connect('postgresql://frodo:friend@localhost:54321/frodo?sslmode=require&channel_binding=disable') do |conn|
-            conn.exec("CREATE TABLE names (id serial primary key, name text)")
+            conn.exec("CREATE TABLE names (id int4, first_name text, surname text)")
           end
         end
         results.cmd_status == "CREATE TABLE"
       end
 
+      do_test("parameterized SELECT query") do
+        results, _ = with_pgpi do
+          PG.connect('postgresql://frodo:friend@localhost:54321/frodo?sslmode=require&channel_binding=disable') do |conn|
+            conn.exec_params("SELECT $1 AS s, generate_series AS n FROM generate_series(1, 3)", ['hello'])
+          end
+        end
+        results.to_a == [{"s" => "hello", "n" => "1"}, {"s" => "hello", "n" => "2"}, {"s" => "hello", "n" => "3"}]
+      end
+
+      do_test("COPY query") do
+        results, _ = with_pgpi do
+          PG.connect('postgresql://frodo:friend@localhost:54321/frodo?sslmode=require&channel_binding=disable') do |conn|
+            conn.copy_data "COPY names FROM STDIN CSV" do
+              conn.put_copy_data "1,Ada,Lovelace\n"
+              conn.put_copy_data "2,Marie,Curie\n"
+              conn.put_copy_data "3,Rosalind,Franklin\n"
+            end
+          end
+        end
+        results.cmd_status == "COPY 3"
+      end
+
+      do_test("INSERT query") do
+        results, _ = with_pgpi do
+          PG.connect('postgresql://frodo:friend@localhost:54321/frodo?sslmode=require&channel_binding=disable') do |conn|
+            conn.exec_params("INSERT INTO names VALUES ($1, $2, $3), ($4, $5, $6), ($7, $8, $9)",
+                             [4, 'Erlich', 'Bachman', 5, 'Richard', 'Hendricks', 6, 'Monica', 'Hall'])
+          end
+        end
+        results.cmd_status == "INSERT 0 3"
+      end
+
       # TODO
-      # test COPY command parsing, INSERT, UPDATE, etc.
       # test replication, server - server
     end
 
-    # additional --override-auth tests
+    # additional --override-auth tests with different server auth configs
 
     with_postgres('trust') do
       do_test("trust auth") do

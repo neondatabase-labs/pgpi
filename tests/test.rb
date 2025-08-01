@@ -34,19 +34,20 @@ Dir.mktmpdir('pgpi-tests') do |tmpdir|
     end
   end
 
-  def with_postgres(auth_method = 'scram-sha-256', port = 54320)
+  def with_postgres(auth_method = 'scram-sha-256', port = 54320, extra = '')
     puts ">> Starting Docker Postgres (auth: #{auth_method}, port: #{port}) ..."
     docker_pid = spawn("docker run --rm --name pgpi-postgres-test \
       -p #{port}:5432 \
       -e POSTGRES_USER=frodo \
       -e POSTGRES_PASSWORD=friend \
-      -e POSTGRES_HOST_AUTH_METHOD=#{auth_method} \
+      -e POSTGRES_HOST_AUTH_METHOD='#{auth_method}' \
       #{auth_method == 'md5' ? '-e POSTGRES_INITDB_ARGS="--auth-local=md5"' : ''} \
       -v #{TMPDIR}:/tmp \
       postgres:17 \
       -c ssl=on \
       -c ssl_cert_file=/tmp/client.pem \
-      -c ssl_key_file=/tmp/client.key", **SPAWN_OPTS)
+      -c ssl_key_file=/tmp/client.key \
+      #{extra}", **SPAWN_OPTS)
 
     await_port(port)
     sleep 1 # for additional setup tasks to complete
@@ -379,7 +380,7 @@ Dir.mktmpdir('pgpi-tests') do |tmpdir|
             conn.exec_params("SELECT $1 AS s, generate_series AS n FROM generate_series(1, 3)", ['hello'])
           end
         end
-        results.to_a == [{"s" => "hello", "n" => "1"}, {"s" => "hello", "n" => "2"}, {"s" => "hello", "n" => "3"}]
+        results.to_a == [{ "s" => "hello", "n" => "1" }, { "s" => "hello", "n" => "2" }, { "s" => "hello", "n" => "3" }]
       end
 
       do_test("COPY query") do
@@ -405,8 +406,6 @@ Dir.mktmpdir('pgpi-tests') do |tmpdir|
         results.cmd_status == "INSERT 0 3"
       end
 
-      # TODO
-      # test replication, server - server
     end
 
     # additional --override-auth tests with different server auth configs
@@ -479,6 +478,42 @@ Dir.mktmpdir('pgpi-tests') do |tmpdir|
                                      'server -> script: "R" = Authentication "\x00\x00\x00\x0c" = 12 bytes "\x00\x00\x00\x05" = AuthenticationMD5Password')
       end
     end
+
+    # replication
+
+    with_postgres("scram-sha-256\nhost replication all 0.0.0.0/0 scram-sha-256", 54320,
+                  "-c wal_level=replica \
+                        -c archive_command='/bin/true' \
+                        -c archive_mode=on \
+                        -c max_wal_senders=3 \
+                        -c max_replication_slots=3 \
+                        -c hot_standby=on") do
+
+      PG.connect('postgresql://frodo:friend@localhost:54320/frodo') do |conn|
+        conn.exec("SELECT * FROM pg_create_physical_replication_slot('replica1');")
+        conn.exec("CREATE ROLE replication WITH REPLICATION PASSWORD 'password' LOGIN;")
+      end
+
+      do_test("streaming replication") do
+        _, pgpi_log = with_pgpi("--fixed-host localhost") do
+          docker_recv_pid = spawn("docker run --rm --name pgpi-postgres-walrecv \
+            postgres:17 \
+            pg_receivewal \
+            -S replica1 \
+            -D /tmp \
+            -d 'postgresql://replication:password@host.docker.internal:54321/frodo?sslmode=require&channel_binding=disable'", **SPAWN_OPTS)
+          sleep 5
+          Process.kill('SIGTERM', docker_recv_pid)
+          Process.wait(docker_recv_pid)
+        end
+        contains(pgpi_log, 'server -> client: "C" = CommandComplete "\x00\x00\x00\x14" = 20 bytes "START_STREAMING\x00" = command tag' + "\n" +
+                           'server -> client: "C" = CommandComplete "\x00\x00\x00\x16" = 22 bytes "START_REPLICATION\x00" = command tag')
+      end
+    end
+
+    # TODO
+    # logical replication, server - server: pg_recvlogical (logical replication)
+    # https://www.postgresql.org/docs/current/protocol-replication.html
 
   ensure
     Process.waitall

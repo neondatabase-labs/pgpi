@@ -4,31 +4,36 @@ require 'timeout'
 require 'tmpdir'
 
 QUIET = ARGV[0] != "--verbose"
+FILTER = ARGV[QUIET ? 0 : 1]
 REDIR = QUIET ? '> /dev/null 2>&1' : ''
 SPAWN_OPTS = QUIET ? { :err => File::NULL, :out => File::NULL } : {}
 
 Dir.mktmpdir('pgpi-tests') do |tmpdir|
   TMPDIR = tmpdir
+  CA_CFG = File.join(TMPDIR, "ca.cfg")
   CA_CSR = File.join(TMPDIR, "ca.csr")
   CA_KEY = File.join(TMPDIR, "ca.key")
   CA_PEM = File.join(TMPDIR, "ca.pem")
+  CLIENT_CFG = File.join(TMPDIR, "client.cfg")
   CLIENT_KEY = File.join(TMPDIR, "client.key")
   CLIENT_CSR = File.join(TMPDIR, "client.csr")
   CLIENT_PEM = File.join(TMPDIR, "client.pem")
 
+  File.write(CA_CFG, "[v3_ca]\nbasicConstraints=critical,CA:true,pathlen:1\n")
+  File.write(CLIENT_CFG, "[dn]\nCN=localhost\n[req]\ndistinguished_name=dn\n[EXT]\nsubjectAltName=DNS:localhost\nkeyUsage=digitalSignature\nextendedKeyUsage=serverAuth\n")
+
   puts '>> Generating TLS cert ...'
-  `openssl req -new -newkey rsa:4096 -nodes -out #{CA_CSR} -keyout #{CA_KEY} -subj "/OU=Unknown/O=Unknown/L=Unknown/ST=Unknown/C=GB" #{REDIR}
-  openssl x509 -trustout -signkey #{CA_KEY} -days 2 -req -in #{CA_CSR} -out #{CA_PEM} #{REDIR}
-  openssl genrsa -out #{CLIENT_KEY} 4096 #{REDIR}
-  openssl req -quiet -new -key #{CLIENT_KEY} -out #{CLIENT_CSR} -sha256 -subj "/OU=Unknown/O=Unknown/L=Unknown/ST=Unknown/C=GB" #{REDIR}
-  openssl x509 -req -days 365 -in #{CLIENT_CSR} -CA #{CA_PEM} -CAkey #{CA_KEY} -out #{CLIENT_PEM} #{REDIR}`
+  `openssl req -new -newkey rsa:4096 -nodes -text -out #{CA_CSR} -keyout #{CA_KEY} -subj "/CN=pgpi" #{REDIR}
+  openssl x509 -req -in #{CA_CSR} -text -days 2 -extfile #{CA_CFG} -extensions v3_ca -signkey #{CA_KEY} -out #{CA_PEM} #{REDIR}
+  openssl req -new -nodes -text -out #{CLIENT_CSR} -keyout #{CLIENT_KEY} -subj "/CN=localhost" -config #{CLIENT_CFG} -extensions EXT #{REDIR}
+  openssl x509 -req -in #{CLIENT_CSR} -text -days 2 -CA #{CA_PEM} -CAkey #{CA_KEY} -out #{CLIENT_PEM} #{REDIR}`
 
   def await_port(port)
     Timeout::timeout(30) do
       begin
         TCPSocket.new('localhost', port).close
       rescue Errno::ECONNREFUSED, Errno::EHOSTUNREACH
-        sleep 0.1
+        sleep 0.5
         retry
       end
     end
@@ -94,10 +99,13 @@ Dir.mktmpdir('pgpi-tests') do |tmpdir|
   $passes = $fails = 0
 
   def do_test(desc)
+    actually_do = FILTER.nil? || desc.include?(FILTER)
+    return unless actually_do
     result = yield
   rescue => err
     result = err
   ensure
+    return unless actually_do
     is_err = result.kind_of?(Exception)
     puts result.full_message if is_err
 
@@ -116,8 +124,26 @@ Dir.mktmpdir('pgpi-tests') do |tmpdir|
   end
 
   begin
-
     with_postgres do
+
+      do_test("connecting to server with --sslmode=verify-full fails without ---sslrootcert") do
+        err_msg = ''
+        begin
+          with_pgpi("--sslmode=verify-full") do
+            do_test_query('postgresql://frodo:friend@localhost:54321/frodo?sslmode=require&channel_binding=disable')
+          end
+        rescue => e
+          err_msg = e.message
+        end
+        contains(err_msg, 'SSL connection has been closed unexpectedly')
+      end
+
+      do_test("connecting to server with --sslmode=verify-full succeeds with appropriate ---sslrootcert") do
+        result, pgpi_log = with_pgpi("--sslmode=verify-full --sslrootcert=#{CA_PEM}") do
+          do_test_query('postgresql://frodo:friend@localhost:54321/frodo?sslmode=require&channel_binding=disable&sslnegotiation=direct')
+        end
+        result
+      end
 
       do_test("basic connection") do
         result, pgpi_log = with_pgpi do
@@ -125,6 +151,7 @@ Dir.mktmpdir('pgpi-tests') do |tmpdir|
         end
         result
       end
+
 
       do_test("strip .local.neon.build") do
         result, _ = with_pgpi do
@@ -236,7 +263,7 @@ Dir.mktmpdir('pgpi-tests') do |tmpdir|
         result && contains(pgpi_log, 'bytes forwarded one by one at')
       end
 
-      do_test("--ssl-cert and --ssl-key matching server to enable channel binding)") do
+      do_test("--ssl-cert and --ssl-key matching server to enable channel binding") do
         result, pgpi_log = with_pgpi("--ssl-cert #{CLIENT_PEM} --ssl-key #{CLIENT_KEY}") do
           do_test_query('postgresql://frodo:friend@localhost:54321/frodo?sslmode=require&channel_binding=require')
         end

@@ -29,6 +29,8 @@ options = { # set defaults
   listen_port: 5432,
   connect_port: 5432,
   ssl_negotiation: "mimic",
+  sslmode: 'prefer',
+  sslrootcert: nil,
   force_password: false,
   redact_passwords: false,
   send_chunks: "whole",
@@ -57,6 +59,10 @@ OptionParser.new do |opts|
           "Port on which to connect to server (default: #{options[:connect_port]})") { |v| options[:connect_port] = v.to_i }
   opts.on("--ssl-negotiation mimic|direct|postgres",
           "SSL negotiation style: mimic client, direct or traditional Postgres (default: #{options[:ssl_negotiation]})") { |v| options[:ssl_negotiation] = v }
+  opts.on("--sslmode disabled|prefer|require|verify-ca|verify-full", ['disabled', 'prefer', 'require', 'verify-ca', 'verify-full'],
+          "SSL mode for connection to server (default: #{options[:sslmode]})") { |v| options[:sslmode] = v }
+  opts.on("--sslrootcert system|/path/to/cert",
+          "Root/CA certificate for connection to server (default: #{options[:sslrootcert]})") { |v| options[:sslrootcert] = v }
   opts.on("--[no-]override-auth",
           "Require password auth from client, do SASL/MD5/password auth with server (default: #{options[:force_password]})") { |v| options[:force_password] = v }
   opts.on("--[no-]channel-binding",
@@ -85,6 +91,8 @@ OptionParser.new do |opts|
           "Where to append server traffic TLS decryption data (default: nowhere)") { |v| options[:server_sslkeylogfile] = v }
   opts.on("--[no-]bw", "Force monochrome output even to TTY (default: auto)") { |v| options[:bw] = v }
 end.parse!
+
+options[:sslmode] = 'verify-full' if options[:sslrootcert] == 'system'  # matches libpq behaviour
 
 ANNOTATE = options[:log_proxied] == "annotated"
 REDACT = options[:redact_passwords]
@@ -141,7 +149,7 @@ class PgMessage
     @source = source # :server, :client, :startup or nil
     @i = 0
   end
-  
+
   def line_break() "\n " end
   def text_or_binary(v) v == 0 ? "text" : v == 1 ? "binary" : "unknown" end
 
@@ -763,7 +771,7 @@ loop do
     end
 
     puts client_sock.cert.to_text, client_sock.cert.to_pem if options[:log_certs] && client_sock.respond_to?(:cert)
-    
+
     next if first_eight.nil? # start again if disconnected
 
     # connection startup + auth
@@ -781,38 +789,56 @@ loop do
     puts "connecting to Postgres server: #{server_name}"
 
     server_sock = TCPSocket.new(server_name, options[:connect_port])
-    server_direct_ssl = options[:ssl_negotiation] == "direct" || (options[:ssl_negotiation] == "mimic" && client_direct_ssl)
 
-    unless server_direct_ssl
-      server_sock.write(ssl_request)
-      puts script_to_server(annotate(hex_inspect(ssl_request), "SSLRequest"))
+    if options[:sslmode] != 'disabled'
+      server_direct_ssl = options[:ssl_negotiation] == "direct" || (options[:ssl_negotiation] == "mimic" && client_direct_ssl)
 
-      server_speaks_ssl = server_sock.read(1)
-      puts server_to_script(annotate(server_speaks_ssl.inspect, server_speaks_ssl == "S" ? "SSL supported" : "SSL not supported"))
-    end
+      unless server_direct_ssl
+        server_sock.write(ssl_request)
+        puts script_to_server(annotate(hex_inspect(ssl_request), "SSLRequest"))
 
-    if server_speaks_ssl == "S" || server_direct_ssl
-      server_ctx = OpenSSL::SSL::SSLContext.new
-      server_ctx.alpn_protocols = ['postgresql']  # required for direct connections
-
-      unless options[:server_sslkeylogfile].nil?
-        server_ctx.keylog_cb = proc do |_, line|
-          File.open(options[:server_sslkeylogfile], "a") { |f| f.puts(line) }
-        end
+        server_speaks_ssl = server_sock.read(1)
+        puts server_to_script(annotate(server_speaks_ssl.inspect, server_speaks_ssl == "S" ? "SSL supported" : "SSL not supported"))
       end
 
-      server_sock = OpenSSL::SSL::SSLSocket.new(server_sock, server_ctx)
-      server_sock.hostname = server_name
-      server_sock.connect
+      if server_speaks_ssl == "S" || server_direct_ssl
+        server_ctx = OpenSSL::SSL::SSLContext.new
+        server_ctx.alpn_protocols = ['postgresql']  # required for direct connections
 
-      puts "#{server_direct_ssl ? "direct " : ""}#{tls_summary(server_sock)} connection established with server"
-      puts server_sock.peer_cert.to_text, server_sock.peer_cert.to_pem if options[:log_certs]
+        server_ctx.verify_mode = options[:sslmode].start_with?('verify') ? OpenSSL::SSL::VERIFY_PEER : OpenSSL::SSL::VERIFY_NONE
+        server_ctx.verify_hostname = options[:sslmode] == 'verify-full'
 
-    elsif server_speaks_ssl == "N"
-      puts "continuing without encryption"
+        server_ctx.cert_store = OpenSSL::X509::Store.new
+        unless options[:sslrootcert].nil?
+          if options[:sslrootcert] == 'system'
+            server_ctx.cert_store.set_default_paths
+          elsif File.directory?(options[:sslrootcert])
+            server_ctx.cert_store.add_path(options[:sslrootcert])
+          else
+            server_ctx.cert_store.add_file(options[:sslrootcert])
+          end
+        end
 
-    else
-      raise "expected S or N in response to SSLRequest, but got #{server_speaks_ssl.inspect}"
+        unless options[:server_sslkeylogfile].nil?
+          server_ctx.keylog_cb = proc do |_, line|
+            File.open(options[:server_sslkeylogfile], "a") { |f| f.puts(line) }
+          end
+        end
+
+        server_sock = OpenSSL::SSL::SSLSocket.new(server_sock, server_ctx)
+        server_sock.hostname = server_name
+        server_sock.connect
+
+        puts "#{server_direct_ssl ? "direct " : ""}#{tls_summary(server_sock)} connection established with server"
+        puts server_sock.peer_cert.to_text, server_sock.peer_cert.to_pem if options[:log_certs]
+
+      elsif server_speaks_ssl == "N"
+        raise 'server does not support SSL' if options[:connect_sslmode] != 'prefer'
+        puts "continuing without encryption"
+
+      else
+        raise "expected S or N in response to SSLRequest, but got #{server_speaks_ssl.inspect}"
+      end
     end
 
     puts "forwarding client startup message to server"

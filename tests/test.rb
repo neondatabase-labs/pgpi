@@ -116,6 +116,7 @@ Dir.mktmpdir('pgpi-tests') do |tmpdir|
   end
 
   begin
+
     with_postgres do
 
       do_test("basic connection") do
@@ -498,22 +499,42 @@ Dir.mktmpdir('pgpi-tests') do |tmpdir|
         _, pgpi_log = with_pgpi("--fixed-host localhost") do
           docker_recv_pid = spawn("docker run --rm --name pgpi-postgres-walrecv \
             postgres:17 \
-            pg_receivewal \
-            -S replica1 \
-            -D /tmp \
-            -d 'postgresql://replication:password@host.docker.internal:54321/frodo?sslmode=require&channel_binding=disable'", **SPAWN_OPTS)
-          sleep 5
+            pg_receivewal -S replica1 -D /tmp \
+              -d 'postgresql://replication:password@host.docker.internal:54321/frodo?sslmode=require&channel_binding=disable'", **SPAWN_OPTS)
+          sleep 3
           Process.kill('SIGTERM', docker_recv_pid)
           Process.wait(docker_recv_pid)
         end
-        contains(pgpi_log, 'server -> client: "C" = CommandComplete "\x00\x00\x00\x14" = 20 bytes "START_STREAMING\x00" = command tag' + "\n" +
-                           'server -> client: "C" = CommandComplete "\x00\x00\x00\x16" = 22 bytes "START_REPLICATION\x00" = command tag')
+        contains(pgpi_log, 'server -> client: "C" = CommandComplete "\x00\x00\x00\x16" = 22 bytes "START_REPLICATION\x00" = command tag')
       end
     end
 
-    # TODO
-    # logical replication, server - server: pg_recvlogical (logical replication)
-    # https://www.postgresql.org/docs/current/protocol-replication.html
+    with_postgres("scram-sha-256\nhost replication all 0.0.0.0/0 scram-sha-256", 54320,
+                  "-c wal_level=logical \
+                        -c max_wal_senders=3 \
+                        -c max_replication_slots=3") do
+
+      PG.connect('postgresql://frodo:friend@localhost:54320/frodo') do |conn|
+        conn.exec("CREATE TABLE t1 (a int, b text, PRIMARY KEY(a));")
+        conn.exec("INSERT INTO t1 (a, b) VALUES (1, 'x'), (2, 'y'), (3, 'z');")
+        conn.exec("CREATE PUBLICATION pub1 FOR ALL TABLES;")
+        conn.exec("CREATE ROLE replication WITH REPLICATION PASSWORD 'password' LOGIN;")
+        conn.exec("SELECT * FROM pg_create_logical_replication_slot('logslot1', 'pgoutput');")
+      end
+
+      do_test("logical replication") do
+        _, pgpi_log = with_pgpi("--fixed-host localhost") do
+          docker_recv_pid = spawn("docker run --rm --name pgpi-postgres-logicalrecv \
+            postgres:17 \
+            pg_recvlogical --start -S logslot1 -P pgoutput -o proto_version=1 -o publication_names=pub1 -f /dev/null \
+              -d 'postgresql://replication:password@host.docker.internal:54321/frodo?sslmode=require&channel_binding=disable'", **SPAWN_OPTS)
+          sleep 3
+          Process.kill('SIGTERM', docker_recv_pid)
+          Process.wait(docker_recv_pid)
+        end
+        contains(pgpi_log, 'server -> client: "C" = CommandComplete "\x00\x00\x00\x16" = 22 bytes "START_REPLICATION\x00" = command tag')
+      end
+    end
 
   ensure
     Process.waitall

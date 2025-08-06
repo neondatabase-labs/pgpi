@@ -155,6 +155,10 @@ Usage: pgpi [options]
         --delete-host-suffix bc.de   Delete a suffix from server hostname provided by client (default: .local.neon.build)
         --listen-port nnnn           Port on which to listen for client connection (default: 5432)
         --connect-port nnnn          Port on which to connect to server (default: 5432)
+        --sslmode disabled|prefer|require|verify-ca|verify-full
+                                     SSL mode for connection to server (default: prefer)
+        --sslrootcert system|/path/to/cert
+                                     Root/CA certificate for connection to server (default: none)
         --ssl-negotiation mimic|direct|postgres
                                      SSL negotiation style: mimic client, direct or traditional Postgres (default: mimic)
         --[no-]override-auth         Require password auth from client, do SASL/MD5/password auth with server (default: false)
@@ -174,6 +178,7 @@ Usage: pgpi [options]
         --server-sslkeylogfile /path/to/log
                                      Where to append server traffic TLS decryption data (default: nowhere)
         --[no-]bw                    Force monochrome output even to TTY (default: auto)
+
 ```
 
 What are these options for?
@@ -215,7 +220,7 @@ And then connect the client via `pgpi` on that port:
 psql 'postgresql://me:mypassword@localhost:5433/mydb'
 ```
 
-### Security
+### Security: connection from client
 
 By default, `pgpi` generates a minimal, self-signed TLS certificate on the fly, and does nothing to interfere with the authentication process.
 
@@ -229,6 +234,11 @@ If your Postgres client is using `channel_binding=require`, you’ll need to:
 1. Downgrade that to `channel_binding=disable`; or
 2. Downgrade to `channel_binding=prefer` _and_ use the `--override-auth` option to have `pgpi` perform authorization on the client’s behalf (cleartext, MD5 and SCRAM auth are supported, by requesting the client’s password in cleartext); or
 3. Supply `pgpi` with precisely the same certificate and private key the server is using, via the `--ssl-cert` and `--ssl-key` options.
+
+
+### Security: connection to server
+
+`pgpi` has `--sslmode` and `--sslrootcert` options that work the same as `libpq`'s. To secure the onward connection to a server with an SSL certificate signed by a public CA, specify `--sslrootcert=system`.
 
 
 ### Logging
@@ -289,11 +299,11 @@ If using Wireshark, you might also want to specify `--log-forwarded none`.
 
 To tun tests, clone this repo and from the root directory:
 
-* Ensure Docker is installed and running
 * Get the `pg` gem: `gem install pg`
-* Optionally: create a file `tests/.env` containing `DATABASE_URL="postgresql://..."`, points to a Postgres DB with a publicly-trusted SSL certificate (e.g. on Neon)
+* Ensure Docker is installed and running
+* Create a file `tests/.env` containing `DATABASE_URL="postgresql://..."` which must point to a database with a PKI-signed SSL cert (e.g. on Neon)
 * Run `tests/test.sh`
-* Or to see OpenSSL and Docker output alongside test results: `ruby tests/test.rb --verbose`
+* Or to see OpenSSL, Docker and pgpi output alongside test results: `tests/test.sh --verbose`
 
 
 ### License

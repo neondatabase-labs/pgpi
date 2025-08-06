@@ -2,7 +2,7 @@
 
 # pgpi: Postgres Private Investigator
 
-**`pgpi` helps monitor, understand and troubleshoot Postgres network traffic: Postgres clients, drivers and [ORMs](https://en.wikipedia.org/wiki/Object%E2%80%93relational_mapping) talking to Postgres servers, proxies and poolers.**
+**`pgpi` helps monitor, understand and troubleshoot Postgres network traffic: Postgres clients, drivers and [ORMs](https://en.wikipedia.org/wiki/Object%E2%80%93relational_mapping) talking to Postgres servers, proxies and poolers.** Also standby servers talking to their primaries and subscriber servers talking to their publishers.
 
 `pgpi` sits between the two parties in a PostgreSQL-protocol exchange, forwarding messages in both directions while parsing and logging them.
 
@@ -238,7 +238,7 @@ If your Postgres client is using `channel_binding=require`, you’ll need to:
 
 ### Security: connection to server
 
-`pgpi` has `--sslmode` and `--sslrootcert` options that work the same as `libpq`'s. To secure the onward connection to a server with an SSL certificate signed by a public CA, specify `--sslrootcert=system`.
+`pgpi` has `--sslmode` and `--sslrootcert` options that work the same as those options to `libpq`. To secure the onward connection to a server with an SSL certificate signed by a public CA, specify `--sslrootcert=system`.
 
 
 ### Logging

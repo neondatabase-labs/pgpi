@@ -2,6 +2,7 @@ require 'pg'
 require 'socket'
 require 'timeout'
 require 'tmpdir'
+require 'uri'
 
 QUIET = ARGV[0] != "--verbose"
 FILTER = ARGV[QUIET ? 0 : 1]
@@ -15,14 +16,14 @@ Dir.mktmpdir('pgpi-tests') do |tmpdir|
   CA_KEY = File.join(TMPDIR, "ca.key")
   CA_PEM = File.join(TMPDIR, "ca.pem")
   CLIENT_CFG = File.join(TMPDIR, "client.cfg")
-  CLIENT_KEY = File.join(TMPDIR, "client.key")
   CLIENT_CSR = File.join(TMPDIR, "client.csr")
+  CLIENT_KEY = File.join(TMPDIR, "client.key")
   CLIENT_PEM = File.join(TMPDIR, "client.pem")
 
   File.write(CA_CFG, "[v3_ca]\nbasicConstraints=critical,CA:true,pathlen:1\n")
   File.write(CLIENT_CFG, "[dn]\nCN=localhost\n[req]\ndistinguished_name=dn\n[EXT]\nsubjectAltName=DNS:localhost\nkeyUsage=digitalSignature\nextendedKeyUsage=serverAuth\n")
 
-  puts '>> Generating TLS cert ...'
+  puts '>> Generating TLS certs ...'
   `openssl req -new -newkey rsa:4096 -nodes -text -out #{CA_CSR} -keyout #{CA_KEY} -subj "/CN=pgpi" #{REDIR}
   openssl x509 -req -in #{CA_CSR} -text -days 2 -extfile #{CA_CFG} -extensions v3_ca -signkey #{CA_KEY} -out #{CA_PEM} #{REDIR}
   openssl req -new -nodes -text -out #{CLIENT_CSR} -keyout #{CLIENT_KEY} -subj "/CN=localhost" -config #{CLIENT_CFG} -extensions EXT #{REDIR}
@@ -76,6 +77,7 @@ Dir.mktmpdir('pgpi-tests') do |tmpdir|
     Process.wait(pgpi_pipe.pid)
     killed = true
     pgpi_log = pgpi_pipe.read
+    puts pgpi_log unless QUIET
     pgpi_pipe.close
     [block_result, pgpi_log]
 
@@ -119,31 +121,12 @@ Dir.mktmpdir('pgpi-tests') do |tmpdir|
   def contains(haystack, needle, expected = true)
     return true if haystack.include?(needle) == expected
     puts haystack
-    puts "-> did not contain: #{needle}"
+    puts "-> unexpectedly #{expected ? 'did not contain' : 'contained'}: #{needle}"
     false
   end
 
   begin
     with_postgres do
-
-      do_test("connecting to server with --sslmode=verify-full fails without ---sslrootcert") do
-        err_msg = ''
-        begin
-          with_pgpi("--sslmode=verify-full") do
-            do_test_query('postgresql://frodo:friend@localhost:54321/frodo?sslmode=require&channel_binding=disable')
-          end
-        rescue => e
-          err_msg = e.message
-        end
-        contains(err_msg, 'SSL connection has been closed unexpectedly')
-      end
-
-      do_test("connecting to server with --sslmode=verify-full succeeds with appropriate ---sslrootcert") do
-        result, pgpi_log = with_pgpi("--sslmode=verify-full --sslrootcert=#{CA_PEM}") do
-          do_test_query('postgresql://frodo:friend@localhost:54321/frodo?sslmode=require&channel_binding=disable&sslnegotiation=direct')
-        end
-        result
-      end
 
       do_test("basic connection") do
         result, pgpi_log = with_pgpi do
@@ -179,6 +162,113 @@ Dir.mktmpdir('pgpi-tests') do |tmpdir|
           do_test_query('postgresql://frodo:friend@localhost:65432/frodo?sslmode=require&channel_binding=disable')
         end
         result
+      end
+
+      do_test("connecting to server with --sslmode=disabled succeeds with no SSL") do
+        result, pgpi_log = with_pgpi("--sslmode=disabled") do
+          do_test_query('postgresql://frodo:friend@localhost:54321/frodo')
+        end
+        result && contains(pgpi_log, "connection established with server", false)  # part of the TLS connection message
+      end
+
+      do_test("connecting to server with --sslmode=prefer (the default) succeeds with SSL") do
+        result, pgpi_log = with_pgpi("--sslmode=prefer") do
+          do_test_query('postgresql://frodo:friend@localhost:54321/frodo?sslmode=require&channel_binding=disable')
+        end
+        result && contains(pgpi_log, "connection established with server")  # part of the TLS connection message
+      end
+
+      do_test("connecting to server with --sslmode=require succeeds with SSL") do
+        result, pgpi_log = with_pgpi("--sslmode=require") do
+          do_test_query('postgresql://frodo:friend@localhost:54321/frodo?sslmode=require&channel_binding=disable')
+        end
+        result && contains(pgpi_log, "connection established with server")
+      end
+
+      do_test("connecting to server with --sslmode=verify-full fails without --sslrootcert (^^ error expected)") do
+        err_msg = ''
+        begin
+          with_pgpi("--sslmode=verify-full") do
+            do_test_query('postgresql://frodo:friend@localhost:54321/frodo?sslmode=require&channel_binding=disable')
+          end
+        rescue => e
+          err_msg = e.message
+        end
+        contains(err_msg, 'SSL connection has been closed unexpectedly')
+      end
+
+      do_test("connecting to server with --sslmode=verify-full fails with appropriate --sslrootcert if host doesn't match (^^ error expected)") do
+        err_msg = ''
+        begin
+          with_pgpi("--sslmode=verify-full") do
+            do_test_query('postgresql://frodo:friend@127.0.0.1:54321/frodo?sslmode=require&channel_binding=disable')
+          end
+        rescue => e
+          err_msg = e.message
+        end
+        contains(err_msg, 'SSL connection has been closed unexpectedly')
+      end
+
+      do_test("connecting to server with --sslmode=verify-full succeeds with appropriate ---sslrootcert") do
+        result, _ = with_pgpi("--sslmode=verify-full --sslrootcert=#{CA_PEM}") do
+          do_test_query('postgresql://frodo:friend@localhost:54321/frodo?sslmode=require&channel_binding=disable')
+        end
+        result
+      end
+
+      do_test("connecting to server with --sslmode=verify-ca fails without ---sslrootcert (^^ error expected)") do
+        err_msg = ''
+        begin
+          with_pgpi("--sslmode=verify-ca") do
+            do_test_query('postgresql://frodo:friend@localhost:54321/frodo?sslmode=require&channel_binding=disable')
+          end
+        rescue => e
+          err_msg = e.message
+        end
+        contains(err_msg, 'SSL connection has been closed unexpectedly')
+      end
+
+      do_test("connecting to server with --sslmode=verify-ca succeeds with appropriate ---sslrootcert") do
+        result, _ = with_pgpi("--sslmode=verify-ca --sslrootcert=#{CA_PEM}") do
+          do_test_query('postgresql://frodo:friend@localhost:54321/frodo?sslmode=require&channel_binding=disable')
+        end
+        result
+      end
+
+      do_test("connecting to server with --sslmode=verify-ca succeeds with appropriate ---sslrootcert even if host doesn't match") do
+        result, _ = with_pgpi("--sslmode=verify-ca --sslrootcert=#{CA_PEM}") do
+          do_test_query('postgresql://frodo:friend@127.0.0.1:54321/frodo?sslmode=require&channel_binding=disable')
+        end
+        result
+      end
+
+      do_test("connecting to server with --sslrootcert=system fails without appropriate certificate (^^ error expected)") do
+        err_msg = ''
+        begin
+          with_pgpi("--sslrootcert=system") do
+            do_test_query('postgresql://frodo:friend@localhost:54321/frodo?sslmode=require&channel_binding=disable')
+          end
+        rescue => e
+          err_msg = e.message
+        end
+        contains(err_msg, 'SSL connection has been closed unexpectedly')
+      end
+
+      if ENV['DATABASE_URL'].nil?
+        puts 'SKIP  cannot test --sslrootcert=system without DATABASE_URL env var'
+      else
+        db_uri = URI.parse(ENV['DATABASE_URL'])
+        db_host = db_uri.host
+        db_port = db_uri.port || 5432
+        db_uri.host = 'localhost'
+        db_uri.port = 54321
+
+        do_test("connecting to server with --sslrootcert=system succeeds when server has appropriate cert") do
+          result, pgpi_log = with_pgpi("--sslrootcert=system --fixed-host #{db_host}", 54321, db_port) do
+            do_test_query(db_uri.to_s)
+          end
+          result && contains(pgpi_log, 'server -> client: "C" = CommandComplete "\x00\x00\x00\x0d" = 13 bytes "SELECT 1\x00" = command tag')
+        end
       end
 
       do_test("--ssl-negotiation postgres") do
@@ -528,7 +618,7 @@ Dir.mktmpdir('pgpi-tests') do |tmpdir|
             postgres:17 \
             pg_receivewal -S replica1 -D /tmp \
               -d 'postgresql://replication:password@host.docker.internal:54321/frodo?sslmode=require&channel_binding=disable'", **SPAWN_OPTS)
-          sleep 3
+          sleep 2
           Process.kill('SIGTERM', docker_recv_pid)
           Process.wait(docker_recv_pid)
         end
@@ -555,7 +645,7 @@ Dir.mktmpdir('pgpi-tests') do |tmpdir|
             postgres:17 \
             pg_recvlogical --start -S logslot1 -P pgoutput -o proto_version=1 -o publication_names=pub1 -f /dev/null \
               -d 'postgresql://replication:password@host.docker.internal:54321/frodo?sslmode=require&channel_binding=disable'", **SPAWN_OPTS)
-          sleep 3
+          sleep 2
           Process.kill('SIGTERM', docker_recv_pid)
           Process.wait(docker_recv_pid)
         end

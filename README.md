@@ -291,7 +291,8 @@ To tun tests, clone this repo and from the root directory:
 
 * Ensure Docker is installed and running
 * Get the `pg` gem: `gem install pg`
-* Run `ruby tests/test.rb`
+* Optionally: create a file `tests/.env` containing `DATABASE_URL="postgresql://..."`, points to a Postgres DB with a publicly-trusted SSL certificate (e.g. on Neon)
+* Run `tests/test.sh`
 * Or to see OpenSSL and Docker output alongside test results: `ruby tests/test.rb --verbose`
 
 

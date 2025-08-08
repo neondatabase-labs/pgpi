@@ -2,7 +2,7 @@
 
 # pgpi: Postgres Private Investigator
 
-**`pgpi` helps monitor, understand and troubleshoot Postgres network traffic: Postgres clients, drivers and [ORMs](https://en.wikipedia.org/wiki/Object%E2%80%93relational_mapping) talking to Postgres servers, proxies and poolers.** Also standby servers talking to their primaries and subscriber servers talking to their publishers.
+**`pgpi` helps monitor, understand and troubleshoot Postgres network traffic: Postgres clients, drivers and ORMs talking to Postgres servers, proxies and poolers** (also: standby servers talking to their primaries and subscriber servers talking to their publishers).
 
 `pgpi` sits between the two parties in a PostgreSQL-protocol exchange, forwarding messages in both directions while parsing and logging them.
 
@@ -18,7 +18,7 @@ If your connection goes over a public network and you can use `pgpi` without cha
 
 A fully-secure Postgres connection requires at least one of these parameters on the client: `channel_binding=require`, `sslrootcert=system`, `sslmode=verify-full`, or (when issuing certificates via your own certificate authority) `sslmode=verify-ca`. Non-libpq clients and drivers may have other ways to specify these features.
 
-Note that `sslmode=require` is quite widely used but [provides no security against MITM attacks](https://neon.com/blog/postgres-needs-better-connection-security-defaults), because it does nothing to check who’s on the other end of a connection.
+Note that `sslmode=require` is quite widely used but by itself [provides no security against MITM attacks](https://neon.com/blog/postgres-needs-better-connection-security-defaults), because it does nothing to check who’s on the other end of a connection.
 
 
 ## Get started with `pgpi`
@@ -26,10 +26,10 @@ Note that `sslmode=require` is quite widely used but [provides no security again
 On macOS, install `pgpi` via Homebrew tap:
 
 ```bash
-% brew install neondatabase-labs/tools/pgpi  # TODO: NOT YET IMPLEMENTED
+% brew install neondatabase-labs/tools/pgpi  # TODO: not yet implemented
 ```
 
-Or on any platform, simply download [the `pgpi` script](pgpi) and run it using (ideally) Ruby 3.3 or higher. It has no dependencies beyond the Ruby standard library.
+Or on any platform, simply download [the `pgpi` script](pgpi) and run it using Ruby 3.3 or higher (earlier Ruby versions may support some but not all features). It has no dependencies beyond the Ruby standard library.
 
 
 ## Example session
@@ -150,11 +150,16 @@ listening ...
 pgpi -- Postgres Private Investigator
 https://github.com/neondatabase-labs/pgpi ++ Copyright 2025 Databricks, Inc. ++ License: Apache 2.0
 
-Usage: pgpi [options]
-        --server-host a.bc.de         Use a fixed Postgres server hostname (default: via SNI, or 'localhost')
-        --server-delete-suffix bc.de   Delete a suffix from server hostname provided by client (default: .local.neon.build)
-        --client-listen-port nnnn           Port on which to listen for client connection (default: 5432)
-        --server-connect-port nnnn          Port on which to connect to server (default: 5432)
+Usage:
+pgpi [options]
+
+--client-... options affect the connection to pgpi from the client
+--server-... options affect the onward connection from pgpi to the server
+
+        --server-host a.b.cd         Use a fixed Postgres server hostname (default: via SNI, or 'localhost')
+        --server-delete-suffix .b.cd Delete a suffix from server hostname provided by client (default: .local.neon.build)
+        --client-listen-port nnnn    Port on which to listen for client connection (default: 5432)
+        --server-connect-port nnnn   Port on which to connect to server (default: 5432)
         --server-sslmode disable|prefer|require|verify-ca|verify-full
                                      SSL mode for connection to server (default: prefer)
         --server-sslrootcert system|/path/to/cert
@@ -162,12 +167,15 @@ Usage: pgpi [options]
         --server-sslnegotiation mimic|direct|postgres
                                      SSL negotiation style: mimic client, direct or traditional Postgres (default: mimic)
         --[no-]override-auth         Require password auth from client, do SASL/MD5/password auth with server (default: false)
-        --[no-]server-channel-binding       Enable channel binding for SASL connection to server with --override-auth (default: true)
+        --server-channel-binding disable|prefer|require
+                                     Channel binding policy for SASL connection to server with --override-auth (default: prefer)
         --[no-]redact-passwords      Redact password messages in logs (default: false)
         --send-chunking whole|byte   Chunk size for sending Postgres data (default: whole)
-        --client-ssl-cert /path/to/cert     TLS certificate for connection with client (default: generated, self-signed)
-        --client-ssl-key /path/to/key       TLS key for connection with client (default: generated)
-        --client-cert-sig rsa|ecdsa         Specify RSA or ECDSA signature for generated certificate (default: rsa)
+        --client-ssl-cert /path/to/cert
+                                     TLS certificate for connection with client (default: generated, self-signed)
+        --client-ssl-key /path/to/key
+                                     TLS key for connection with client (default: generated)
+        --client-cert-sig rsa|ecdsa  Specify RSA or ECDSA signature for generated certificate (default: rsa)
         --[no-]client-deny-ssl       Tell client that SSL is not supported (default: false)
         --[no-]log-certs             Log TLS certificates (default: false)
         --log-forwarded none|raw|annotated
@@ -178,7 +186,6 @@ Usage: pgpi [options]
         --server-sslkeylogfile /path/to/log
                                      Where to append server traffic TLS decryption data (default: nowhere)
         --[no-]bw                    Force monochrome output even to TTY (default: auto)
-
 ```
 
 What are these options for?
@@ -192,7 +199,7 @@ In many cases you’ll probably run your Postgres client and `pgpi` on the same 
 
 When you connect your Postgres client via `pgpi` over TLS, `pgpi` uses [SNI](https://en.wikipedia.org/wiki/Server_Name_Indication) to find out what server hostname you gave the client. `pgpi` tries to forward the connection on to that same hostname, except that it first strips off the suffix `.local.neon.build` if present.
 
-> `local.neon.build` is set up such that every possible subdomain — `*.local.neon.build`, `*.*.local.neon.build`, etc. — resolves to your local machine, `127.0.0.1`.
+> `local.neon.build` is set up such that every possible subdomain — `*.local.neon.build`, `*.*.local.neon.build`, etc. — resolves to your local machine, `127.0.0.1`. It's similar to services such as [localtest.me](https://github.com/localtest-dot-me/localtest-dot-me.github.com?tab=readme-ov-file).
 
 In the example, `ep-crimson-sound-a8nnh11s.eastus2.azure.neon.tech.local.neon.build` is just an alias for your local machine, where `pgpi` is running. `pgpi` then turns that hostname back into the real hostname, `ep-crimson-sound-a8nnh11s.eastus2.azure.neon.tech`, for the onward connection.
 
@@ -208,13 +215,13 @@ If the server is on the same machine as `pgpi` and the client, you’ll want `pg
 
 Use `pgpi`'s `--client-listen-port` and `--server-connect-port` options to achieve this. Both `--client-listen-port` and `--server-connect-port` default to the standard Postgres port, `5432`.
 
-So if your server is running on port `5432`, you might do:
+So if your server is running on port `5432`, you might have `pgpi` listen on a non-standard port:
 
 ```bash
 pgpi --client-listen-port 5433
 ```
 
-And then connect the client via `pgpi` on that port:
+And then connect the client via `pgpi` on that non-standard port:
 
 ```bash
 psql 'postgresql://me:mypassword@localhost:5433/mydb'
@@ -245,7 +252,7 @@ If your Postgres client is using `channel_binding=require`, you’ll need to:
 
 By default, `pgpi` logs and annotates all Postgres traffic that passes through. This behaviour can be specified explicitly as `--log-forwarded annotated`.
 
-Alternatives are `--log-forwarded raw`, which logs the data without annotation (it just calls Ruby’s `inspect` on the binary string), or `--log-forwarded none`, which prevents logging. You might use `--log-forwarded none` if you're using `pgpi` to enable the use of Wireshark, for example.
+Alternatives are `--log-forwarded raw`, which logs the data without annotation (it just calls Ruby’s `inspect` on the binary string), or `--log-forwarded none`, which prevents most logging. You might use `--log-forwarded none` if you're using `pgpi` to enable the use of Wireshark, for example.
 
 Example log line for `--log-forwarded annotated`:
 

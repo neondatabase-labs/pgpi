@@ -48,7 +48,7 @@ options = { # set defaults
 }
 
 OptionParser.new do |opts|
-  opts.banner = "#{SCRIPT_NAME}\n#{SCRIPT_INFO}\n\nUsage:\npgpi [options]\n\n--client-... options affect connections to pgpi from clients\n--server-... options affect the onward connection from pgpi to the server\n\n"
+  opts.banner = "#{SCRIPT_NAME}\n#{SCRIPT_INFO}\n\nUsage:\npgpi [options]\n\n--client-... options affect the connection to pgpi from the client\n--server-... options affect the onward connection from pgpi to the server\n\n"
   opts.on("--server-host a.b.cd",
           "Use a fixed Postgres server hostname (default: via SNI, or 'localhost')") { |v| options[:target] = v }
   opts.on("--server-delete-suffix .b.cd",

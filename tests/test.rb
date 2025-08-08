@@ -48,11 +48,11 @@ Dir.mktmpdir('pgpi-tests') do |tmpdir|
       -e POSTGRES_PASSWORD=friend \
       -e POSTGRES_HOST_AUTH_METHOD='#{auth_method}' \
       #{auth_method == 'md5' ? '-e POSTGRES_INITDB_ARGS="--auth-local=md5"' : ''} \
-      -v #{TMPDIR}:/tmp \
+      -v #{TMPDIR}:/etc/ssl/pg \
       postgres:17 \
       -c ssl=on \
-      -c ssl_cert_file=/tmp/client.pem \
-      -c ssl_key_file=/tmp/client.key \
+      -c ssl_cert_file=/etc/ssl/pg/client.pem \
+      -c ssl_key_file=/etc/ssl/pg/client.key \
       #{extra}", **SPAWN_OPTS)
 
     await_port(port)
@@ -69,7 +69,7 @@ Dir.mktmpdir('pgpi-tests') do |tmpdir|
 
   def with_pgpi(args = '', listen_port = 54321, connect_port = 54320)
     killed = false
-    pgpi_pipe = IO.popen("./pgpi --connect-port #{connect_port} --listen-port #{listen_port} #{args}")
+    pgpi_pipe = IO.popen("./pgpi --server-connect-port #{connect_port} --client-listen-port #{listen_port} #{args}")
     await_port(listen_port)
     block_result = yield
 
@@ -144,14 +144,14 @@ Dir.mktmpdir('pgpi-tests') do |tmpdir|
       end
 
       do_test("strip an alternative suffix") do
-        result, _ = with_pgpi("--delete-host-suffix .localtest.me") do
+        result, _ = with_pgpi("--server-delete-suffix .localtest.me") do
           do_test_query('postgresql://frodo:friend@localhost.localtest.me:54321/frodo?sslmode=require&channel_binding=disable')
         end
         result
       end
 
       do_test("specify a fixed host name") do
-        result, _ = with_pgpi("--fixed-host localhost") do
+        result, _ = with_pgpi("--server-host localhost") do
           do_test_query('postgresql://frodo:friend@imaginary.server.local.neon.build:54321/frodo?sslmode=require&channel_binding=disable')
         end
         result
@@ -164,31 +164,31 @@ Dir.mktmpdir('pgpi-tests') do |tmpdir|
         result
       end
 
-      do_test("connecting to server with --sslmode=disabled succeeds with no SSL") do
-        result, pgpi_log = with_pgpi("--sslmode=disabled") do
+      do_test("connecting to server with --server-sslmode=disabled succeeds with no SSL") do
+        result, pgpi_log = with_pgpi("--server-sslmode=disabled") do
           do_test_query('postgresql://frodo:friend@localhost:54321/frodo')
         end
         result && contains(pgpi_log, "connection established with server", false)  # part of the TLS connection message
       end
 
-      do_test("connecting to server with --sslmode=prefer (the default) succeeds with SSL") do
-        result, pgpi_log = with_pgpi("--sslmode=prefer") do
+      do_test("connecting to server with --server-sslmode=prefer (the default) succeeds with SSL") do
+        result, pgpi_log = with_pgpi("--server-sslmode=prefer") do
           do_test_query('postgresql://frodo:friend@localhost:54321/frodo?sslmode=require&channel_binding=disable')
         end
         result && contains(pgpi_log, "connection established with server")  # part of the TLS connection message
       end
 
-      do_test("connecting to server with --sslmode=require succeeds with SSL") do
-        result, pgpi_log = with_pgpi("--sslmode=require") do
+      do_test("connecting to server with --server-sslmode=require succeeds with SSL") do
+        result, pgpi_log = with_pgpi("--server-sslmode=require") do
           do_test_query('postgresql://frodo:friend@localhost:54321/frodo?sslmode=require&channel_binding=disable')
         end
         result && contains(pgpi_log, "connection established with server")
       end
 
-      do_test("connecting to server with --sslmode=verify-full fails without --sslrootcert (^^ error expected)") do
+      do_test("connecting to server with --server-sslmode=verify-full fails without --server-sslrootcert (^^ error expected)") do
         err_msg = ''
         begin
-          with_pgpi("--sslmode=verify-full") do
+          with_pgpi("--server-sslmode=verify-full") do
             do_test_query('postgresql://frodo:friend@localhost:54321/frodo?sslmode=require&channel_binding=disable')
           end
         rescue => e
@@ -197,10 +197,10 @@ Dir.mktmpdir('pgpi-tests') do |tmpdir|
         contains(err_msg, 'SSL connection has been closed unexpectedly')
       end
 
-      do_test("connecting to server with --sslmode=verify-full fails with appropriate --sslrootcert if host doesn't match (^^ error expected)") do
+      do_test("connecting to server with --server-sslmode=verify-full fails with appropriate --server-sslrootcert if host doesn't match (^^ error expected)") do
         err_msg = ''
         begin
-          with_pgpi("--sslmode=verify-full") do
+          with_pgpi("--server-sslmode=verify-full") do
             do_test_query('postgresql://frodo:friend@127.0.0.1:54321/frodo?sslmode=require&channel_binding=disable')
           end
         rescue => e
@@ -209,17 +209,17 @@ Dir.mktmpdir('pgpi-tests') do |tmpdir|
         contains(err_msg, 'SSL connection has been closed unexpectedly')
       end
 
-      do_test("connecting to server with --sslmode=verify-full succeeds with appropriate ---sslrootcert") do
-        result, _ = with_pgpi("--sslmode=verify-full --sslrootcert=#{CA_PEM}") do
+      do_test("connecting to server with --server-sslmode=verify-full succeeds with appropriate ---server-sslrootcert") do
+        result, _ = with_pgpi("--server-sslmode=verify-full --server-sslrootcert=#{CA_PEM}") do
           do_test_query('postgresql://frodo:friend@localhost:54321/frodo?sslmode=require&channel_binding=disable')
         end
         result
       end
 
-      do_test("connecting to server with --sslmode=verify-ca fails without ---sslrootcert (^^ error expected)") do
+      do_test("connecting to server with --server-sslmode=verify-ca fails without ---server-sslrootcert (^^ error expected)") do
         err_msg = ''
         begin
-          with_pgpi("--sslmode=verify-ca") do
+          with_pgpi("--server-sslmode=verify-ca") do
             do_test_query('postgresql://frodo:friend@localhost:54321/frodo?sslmode=require&channel_binding=disable')
           end
         rescue => e
@@ -228,24 +228,24 @@ Dir.mktmpdir('pgpi-tests') do |tmpdir|
         contains(err_msg, 'SSL connection has been closed unexpectedly')
       end
 
-      do_test("connecting to server with --sslmode=verify-ca succeeds with appropriate ---sslrootcert") do
-        result, _ = with_pgpi("--sslmode=verify-ca --sslrootcert=#{CA_PEM}") do
+      do_test("connecting to server with --server-sslmode=verify-ca succeeds with appropriate ---server-sslrootcert") do
+        result, _ = with_pgpi("--server-sslmode=verify-ca --server-sslrootcert=#{CA_PEM}") do
           do_test_query('postgresql://frodo:friend@localhost:54321/frodo?sslmode=require&channel_binding=disable')
         end
         result
       end
 
-      do_test("connecting to server with --sslmode=verify-ca succeeds with appropriate ---sslrootcert even if host doesn't match") do
-        result, _ = with_pgpi("--sslmode=verify-ca --sslrootcert=#{CA_PEM}") do
+      do_test("connecting to server with --server-sslmode=verify-ca succeeds with appropriate ---server-sslrootcert even if host doesn't match") do
+        result, _ = with_pgpi("--server-sslmode=verify-ca --server-sslrootcert=#{CA_PEM}") do
           do_test_query('postgresql://frodo:friend@127.0.0.1:54321/frodo?sslmode=require&channel_binding=disable')
         end
         result
       end
 
-      do_test("connecting to server with --sslrootcert=system fails without appropriate certificate (^^ error expected)") do
+      do_test("connecting to server with --server-sslrootcert=system fails without appropriate certificate (^^ error expected)") do
         err_msg = ''
         begin
-          with_pgpi("--sslrootcert=system") do
+          with_pgpi("--server-sslrootcert=system") do
             do_test_query('postgresql://frodo:friend@localhost:54321/frodo?sslmode=require&channel_binding=disable')
           end
         rescue => e
@@ -255,7 +255,7 @@ Dir.mktmpdir('pgpi-tests') do |tmpdir|
       end
 
       if ENV['DATABASE_URL'].nil?
-        puts 'SKIP  cannot test --sslrootcert=system without DATABASE_URL env var'
+        puts 'SKIP  cannot test --server-sslrootcert=system without DATABASE_URL env var'
       else
         db_uri = URI.parse(ENV['DATABASE_URL'])
         db_host = db_uri.host
@@ -263,36 +263,36 @@ Dir.mktmpdir('pgpi-tests') do |tmpdir|
         db_uri.host = 'localhost'
         db_uri.port = 54321
 
-        do_test("connecting to server with --sslrootcert=system succeeds when server has appropriate cert") do
-          result, pgpi_log = with_pgpi("--sslrootcert=system --fixed-host #{db_host}", 54321, db_port) do
+        do_test("connecting to server with --server-sslrootcert=system succeeds when server has appropriate cert") do
+          result, pgpi_log = with_pgpi("--server-sslrootcert=system --server-host #{db_host}", 54321, db_port) do
             do_test_query(db_uri.to_s)
           end
           result && contains(pgpi_log, 'server -> client: "C" = CommandComplete "\x00\x00\x00\x0d" = 13 bytes "SELECT 1\x00" = command tag')
         end
       end
 
-      do_test("--ssl-negotiation postgres") do
-        result, pgpi_log = with_pgpi("--ssl-negotiation postgres") do
+      do_test("--server-sslnegotiation postgres") do
+        result, pgpi_log = with_pgpi("--server-sslnegotiation postgres") do
           do_test_query('postgresql://frodo:friend@localhost:54321/frodo?sslmode=require&channel_binding=disable')
         end
         result && contains(pgpi_log, "direct TLSv1.3/TLS_AES_256_GCM_SHA384 connection established with server", false)
       end
 
-      do_test("--ssl-negotiation direct") do
-        result, pgpi_log = with_pgpi("--ssl-negotiation direct") do
+      do_test("--server-sslnegotiation direct") do
+        result, pgpi_log = with_pgpi("--server-sslnegotiation direct") do
           do_test_query('postgresql://frodo:friend@localhost:54321/frodo?sslmode=require&channel_binding=disable')
         end
         result && contains(pgpi_log, "direct TLSv1.3/TLS_AES_256_GCM_SHA384 connection established with server")
       end
 
-      do_test("--ssl-negotiation mimic, where client uses Postgres SSL negotiation") do
+      do_test("--server-sslnegotiation mimic, where client uses Postgres SSL negotiation") do
         result, pgpi_log = with_pgpi do
           do_test_query('postgresql://frodo:friend@localhost:54321/frodo?sslmode=require&channel_binding=disable&sslnegotiation=postgres')
         end
         result && contains(pgpi_log, "direct TLSv1.3/TLS_AES_256_GCM_SHA384 connection established with server", false)
       end
 
-      do_test("--ssl-negotiation mimic, where client uses direct SSL connection") do
+      do_test("--server-sslnegotiation mimic, where client uses direct SSL connection") do
         result, pgpi_log = with_pgpi do
           do_test_query('postgresql://frodo:friend@localhost:54321/frodo?sslmode=require&channel_binding=disable&sslnegotiation=direct')
         end
@@ -338,7 +338,7 @@ Dir.mktmpdir('pgpi-tests') do |tmpdir|
       end
 
       do_test("--override-auth with no channel binding") do
-        result, pgpi_log = with_pgpi("--override-auth --no-channel-binding") do
+        result, pgpi_log = with_pgpi("--override-auth --no-server-channel-binding") do
           do_test_query('postgresql://frodo:friend@localhost:54321/frodo?sslmode=require&channel_binding=disable')
         end
         result && contains(pgpi_log, 'script -> server: "p" = SASLInitialResponse "\x00\x00\x00\x4b" = 75 bytes' + "\n" +
@@ -353,8 +353,8 @@ Dir.mktmpdir('pgpi-tests') do |tmpdir|
         result && contains(pgpi_log, 'bytes forwarded one by one at')
       end
 
-      do_test("--ssl-cert and --ssl-key matching server to enable channel binding") do
-        result, pgpi_log = with_pgpi("--ssl-cert #{CLIENT_PEM} --ssl-key #{CLIENT_KEY}") do
+      do_test("--client-ssl-cert and --client-ssl-key matching server to enable channel binding") do
+        result, pgpi_log = with_pgpi("--client-ssl-cert #{CLIENT_PEM} --client-ssl-key #{CLIENT_KEY}") do
           do_test_query('postgresql://frodo:friend@localhost:54321/frodo?sslmode=require&channel_binding=require')
         end
         result && contains(pgpi_log, 'client -> server: "p" = SASLInitialResponse "\x00\x00\x00\x50" = 80 bytes' + "\n" +
@@ -372,7 +372,7 @@ Dir.mktmpdir('pgpi-tests') do |tmpdir|
       end
 
       do_test("--log-certs with ECDSA generated cert") do
-        result, pgpi_log = with_pgpi("--log-certs --cert-sig ecdsa") do
+        result, pgpi_log = with_pgpi("--log-certs --client-cert-sig ecdsa") do
           do_test_query('postgresql://frodo:friend@localhost:54321/frodo?sslmode=require&channel_binding=disable')
         end
         result && contains(pgpi_log, '        Subject: CN=pgpi -- Postgres Private Investigator' + "\n" +
@@ -381,10 +381,10 @@ Dir.mktmpdir('pgpi-tests') do |tmpdir|
                                      '                Public-Key: (256 bit)')
       end
 
-      do_test("--deny-client-ssl causes connection error with sslmode=require") do
+      do_test("--client-deny-ssl causes connection error with sslmode=require") do
         err_msg = ''
         begin
-          with_pgpi("--deny-client-ssl") do
+          with_pgpi("--client-deny-ssl") do
             do_test_query('postgresql://frodo:friend@localhost:54321/frodo?sslmode=require&channel_binding=disable')
           end
         rescue => e
@@ -393,10 +393,10 @@ Dir.mktmpdir('pgpi-tests') do |tmpdir|
         contains(err_msg, 'server does not support SSL, but SSL was required')
       end
 
-      do_test("--deny-client-ssl fails when channel binding is offered") do
+      do_test("--client-deny-ssl fails when channel binding is offered") do
         err_msg = ''
         begin
-          with_pgpi("--deny-client-ssl") do
+          with_pgpi("--client-deny-ssl") do
             do_test_query('postgresql://frodo:friend@localhost:54321/frodo')
           end
         rescue => e
@@ -405,8 +405,8 @@ Dir.mktmpdir('pgpi-tests') do |tmpdir|
         contains(err_msg, 'server offered SCRAM-SHA-256-PLUS authentication over a non-SSL connection')
       end
 
-      do_test("--deny-client-ssl succeeds with --override-auth") do
-        result, pgpi_log = with_pgpi("--deny-client-ssl --override-auth") do
+      do_test("--client-deny-ssl succeeds with --override-auth") do
+        result, pgpi_log = with_pgpi("--client-deny-ssl --override-auth") do
           do_test_query('postgresql://frodo:friend@localhost:54321/frodo')
         end
         result && contains(pgpi_log, 'script -> client: "N" = SSL not supported')
@@ -613,7 +613,7 @@ Dir.mktmpdir('pgpi-tests') do |tmpdir|
       end
 
       do_test("streaming replication") do
-        _, pgpi_log = with_pgpi("--fixed-host localhost") do
+        _, pgpi_log = with_pgpi("--server-host localhost") do
           docker_recv_pid = spawn("docker run --rm --name pgpi-postgres-walrecv \
             postgres:17 \
             pg_receivewal -S replica1 -D /tmp \
@@ -640,7 +640,7 @@ Dir.mktmpdir('pgpi-tests') do |tmpdir|
       end
 
       do_test("logical replication") do
-        _, pgpi_log = with_pgpi("--fixed-host localhost") do
+        _, pgpi_log = with_pgpi("--server-host localhost") do
           docker_recv_pid = spawn("docker run --rm --name pgpi-postgres-logicalrecv \
             postgres:17 \
             pg_recvlogical --start -S logslot1 -P pgoutput -o proto_version=1 -o publication_names=pub1 -f /dev/null \

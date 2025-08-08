@@ -48,36 +48,36 @@ options = { # set defaults
 }
 
 OptionParser.new do |opts|
-  opts.banner = "#{SCRIPT_NAME}\n#{SCRIPT_INFO}\n\nUsage: pgpi [options]"
-  opts.on("--fixed-host a.bc.de",
+  opts.banner = "#{SCRIPT_NAME}\n#{SCRIPT_INFO}\n\nUsage:\npgpi [options]\n\n--client-... options affect connections to pgpi from clients\n--server-... options affect the onward connection from pgpi to the server\n\n"
+  opts.on("--server-host a.b.cd",
           "Use a fixed Postgres server hostname (default: via SNI, or 'localhost')") { |v| options[:target] = v }
-  opts.on("--delete-host-suffix bc.de",
+  opts.on("--server-delete-suffix .b.cd",
           "Delete a suffix from server hostname provided by client (default: #{options[:delete_host_suffix]})") { |v| options[:delete_host_suffix] = v }
-  opts.on("--listen-port nnnn", /\d{1,5}/,
+  opts.on("--client-listen-port nnnn", /\d{1,5}/,
           "Port on which to listen for client connection (default: #{options[:listen_port]})") { |v| options[:listen_port] = v.to_i }
-  opts.on("--connect-port nnnn", /\d{1,5}/,
+  opts.on("--server-connect-port nnnn", /\d{1,5}/,
           "Port on which to connect to server (default: #{options[:connect_port]})") { |v| options[:connect_port] = v.to_i }
-  opts.on("--sslmode disabled|prefer|require|verify-ca|verify-full", ['disabled', 'prefer', 'require', 'verify-ca', 'verify-full'],
+  opts.on("--server-sslmode disabled|prefer|require|verify-ca|verify-full", ['disabled', 'prefer', 'require', 'verify-ca', 'verify-full'],
           "SSL mode for connection to server (default: #{options[:sslmode]})") { |v| options[:sslmode] = v }
-  opts.on("--sslrootcert system|/path/to/cert",
+  opts.on("--server-sslrootcert system|/path/to/cert",
           "Root/CA certificate for connection to server (default: #{options[:sslrootcert] || 'none'})") { |v| options[:sslrootcert] = v }
-  opts.on("--ssl-negotiation mimic|direct|postgres",
+  opts.on("--server-sslnegotiation mimic|direct|postgres",
           "SSL negotiation style: mimic client, direct or traditional Postgres (default: #{options[:ssl_negotiation]})") { |v| options[:ssl_negotiation] = v }
   opts.on("--[no-]override-auth",
           "Require password auth from client, do SASL/MD5/password auth with server (default: #{options[:force_password]})") { |v| options[:force_password] = v }
-  opts.on("--[no-]channel-binding",
+  opts.on("--[no-]server-channel-binding",
           "Enable channel binding for SASL connection to server with --override-auth (default: #{options[:channel_binding]})") { |v| options[:channel_binding] = v }
   opts.on("--[no-]redact-passwords",
           "Redact password messages in logs (default: #{options[:redact_passwords]})") { |v| options[:redact_passwords] = v }
   opts.on("--send-chunking whole|byte", ["whole", "byte"],
           "Chunk size for sending Postgres data (default: #{options[:send_chunks]})") { |v| options[:send_chunks] = v }
-  opts.on("--ssl-cert /path/to/cert",
+  opts.on("--client-ssl-cert /path/to/cert",
           "TLS certificate for connection with client (default: generated, self-signed)") { |v| options[:ssl_cert] = v }
-  opts.on("--ssl-key /path/to/key",
+  opts.on("--client-ssl-key /path/to/key",
           "TLS key for connection with client (default: generated)") { |v| options[:ssl_key] = v }
-  opts.on("--cert-sig rsa|ecdsa", ["rsa", "ecdsa"],
+  opts.on("--client-cert-sig rsa|ecdsa", ["rsa", "ecdsa"],
           "Specify RSA or ECDSA signature for generated certificate (default: #{options[:cert_sig]})") { |v| options[:cert_sig] = v}
-  opts.on("--[no-]deny-client-ssl",
+  opts.on("--[no-]client-deny-ssl",
           "Tell client that SSL is not supported (default: #{options[:deny_ssl]})") { |v| options[:deny_ssl] = v }
   opts.on("--[no-]log-certs",
           "Log TLS certificates (default: #{options[:log_certs]})") { |v| options[:log_certs] = v }
@@ -108,7 +108,7 @@ if options[:force_password] && !has_sasl
 end
 
 if options[:cert_sig] == "ecdsa" && !OpenSSL::PKey::EC.method_defined?(:public_to_pem)
-  puts "Missing OpenSSL::PKey::EC#public_to_pem, so --cert-sig ecdsa is not supported. Please use Ruby 3.1 or higher."
+  puts "Missing OpenSSL::PKey::EC#public_to_pem, so --client-cert-sig ecdsa is not supported. Please use Ruby 3.1 or higher."
   exit 1
 end
 
@@ -707,7 +707,7 @@ loop do
       client_ctx.key = OpenSSL::PKey::RSA.new(File.open(options[:ssl_key]))
       client_ctx.cert = OpenSSL::X509::Certificate.new(File.open(options[:ssl_cert]))
     else
-      raise "must specify both or neither of --ssl-cert and --ssl-key" if options[:ssl_key] || options[:ssl_cert]
+      raise "must specify both or neither of --client-ssl-cert and --client-ssl-key" if options[:ssl_key] || options[:ssl_cert]
       client_ctx.key, client_ctx.cert = make_key_and_cert("CN=#{SCRIPT_NAME}", options[:cert_sig])
     end
 

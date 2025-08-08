@@ -151,24 +151,24 @@ pgpi -- Postgres Private Investigator
 https://github.com/neondatabase-labs/pgpi ++ Copyright 2025 Databricks, Inc. ++ License: Apache 2.0
 
 Usage: pgpi [options]
-        --fixed-host a.bc.de         Use a fixed Postgres server hostname (default: via SNI, or 'localhost')
-        --delete-host-suffix bc.de   Delete a suffix from server hostname provided by client (default: .local.neon.build)
-        --listen-port nnnn           Port on which to listen for client connection (default: 5432)
-        --connect-port nnnn          Port on which to connect to server (default: 5432)
-        --sslmode disabled|prefer|require|verify-ca|verify-full
+        --server-host a.bc.de         Use a fixed Postgres server hostname (default: via SNI, or 'localhost')
+        --server-delete-suffix bc.de   Delete a suffix from server hostname provided by client (default: .local.neon.build)
+        --client-listen-port nnnn           Port on which to listen for client connection (default: 5432)
+        --server-connect-port nnnn          Port on which to connect to server (default: 5432)
+        --server-sslmode disabled|prefer|require|verify-ca|verify-full
                                      SSL mode for connection to server (default: prefer)
-        --sslrootcert system|/path/to/cert
+        --server-sslrootcert system|/path/to/cert
                                      Root/CA certificate for connection to server (default: none)
-        --ssl-negotiation mimic|direct|postgres
+        --server-sslnegotiation mimic|direct|postgres
                                      SSL negotiation style: mimic client, direct or traditional Postgres (default: mimic)
         --[no-]override-auth         Require password auth from client, do SASL/MD5/password auth with server (default: false)
-        --[no-]channel-binding       Enable channel binding for SASL connection to server with --override-auth (default: true)
+        --[no-]server-channel-binding       Enable channel binding for SASL connection to server with --override-auth (default: true)
         --[no-]redact-passwords      Redact password messages in logs (default: false)
         --send-chunking whole|byte   Chunk size for sending Postgres data (default: whole)
-        --ssl-cert /path/to/cert     TLS certificate for connection with client (default: generated, self-signed)
-        --ssl-key /path/to/key       TLS key for connection with client (default: generated)
-        --cert-sig rsa|ecdsa         Specify RSA or ECDSA signature for generated certificate (default: rsa)
-        --[no-]deny-client-ssl       Tell client that SSL is not supported (default: false)
+        --client-ssl-cert /path/to/cert     TLS certificate for connection with client (default: generated, self-signed)
+        --client-ssl-key /path/to/key       TLS key for connection with client (default: generated)
+        --client-cert-sig rsa|ecdsa         Specify RSA or ECDSA signature for generated certificate (default: rsa)
+        --[no-]client-deny-ssl       Tell client that SSL is not supported (default: false)
         --[no-]log-certs             Log TLS certificates (default: false)
         --log-forwarded none|raw|annotated
                                      Whether and how to log forwarded traffic (default: annotated)
@@ -198,20 +198,20 @@ In the example, `ep-crimson-sound-a8nnh11s.eastus2.azure.neon.tech.local.neon.bu
 
 It’s also possible to:
 
-* Configure `pgpi` to strip a different domain suffix using the option `--delete-host-suffix .abc.xyz`.
+* Configure `pgpi` to strip a different domain suffix using the option `--server-delete-suffix .abc.xyz`.
 
-* Specify a fixed server hostname, instead of getting it via SNI from the client, using the `--fixed-host db.blah.xyz` option. This is useful especially for non-TLS client connections, where SNI is unavailable.
+* Specify a fixed server hostname, instead of getting it via SNI from the client, using the `--server-host db.blah.xyz` option. This is useful especially for non-TLS client connections, where SNI is unavailable.
 
 #### Local Postgres, `pgpi` and client
 
 If the server is on the same machine as `pgpi` and the client, you’ll want `pgpi` and the Postgres server to listen for connections on different ports.
 
-Use `pgpi`'s `--listen-port` and `--connect-port` options to achieve this. Both `--listen-port` and `--connect-port` default to the standard Postgres port, `5432`.
+Use `pgpi`'s `--client-listen-port` and `--server-connect-port` options to achieve this. Both `--client-listen-port` and `--server-connect-port` default to the standard Postgres port, `5432`.
 
 So if your server is running on port `5432`, you might do:
 
 ```bash
-pgpi --listen-port 5433
+pgpi --client-listen-port 5433
 ```
 
 And then connect the client via `pgpi` on that port:
@@ -227,18 +227,18 @@ By default, `pgpi` generates a minimal, self-signed TLS certificate on the fly, 
 If your Postgres client is using `sslrootcert=system`, `sslmode=verify-full` or `sslmode=verify-ca` you’ll need to either:
 
 1. Downgrade that to `sslmode=require` or lower; or 
-2. Supply `pgpi` with a TLS certificate that’s trusted according to `sslrootcert`, plus the corresponding private key, using the `--ssl-cert` and `--ssl-key` options.
+2. Supply `pgpi` with a TLS certificate that’s trusted according to `sslrootcert`, plus the corresponding private key, using the `--client-ssl-cert` and `--client-ssl-key` options.
 
 If your Postgres client is using `channel_binding=require`, you’ll need to:
 
 1. Downgrade that to `channel_binding=disable`; or
 2. Downgrade to `channel_binding=prefer` _and_ use the `--override-auth` option to have `pgpi` perform authorization on the client’s behalf (cleartext, MD5 and SCRAM auth are supported, by requesting the client’s password in cleartext); or
-3. Supply `pgpi` with precisely the same certificate and private key the server is using, via the `--ssl-cert` and `--ssl-key` options.
+3. Supply `pgpi` with precisely the same certificate and private key the server is using, via the `--client-ssl-cert` and `--client-ssl-key` options.
 
 
 ### Security: connection to server
 
-`pgpi` has `--sslmode` and `--sslrootcert` options that work the same as those options to `libpq`. To secure the onward connection to a server with an SSL certificate signed by a public CA, specify `--sslrootcert=system`.
+`pgpi` has `--server-sslmode` and `--server-sslrootcert` options that work the same as those options to `libpq`. To secure the onward connection to a server with an SSL certificate signed by a public CA, specify `--server-sslrootcert=system`.
 
 
 ### Logging
@@ -268,11 +268,11 @@ Use `--bw` to suppress colours in TTY output (or `--no-bw` to force colours even
 
 ### Connection options
 
-The `--ssl-negotiation direct` option tells `pgpi` to initiate a TLS connection to the server immediately, without first sending an SSLRequest message (this is a [new feature in Postgres 17+](https://www.postgresql.org/docs/current/release-17.html#RELEASE-17-LIBPQ) and saves a network round-trip). Specifying `--ssl-negotiation postgres` has the opposite effect. The default is `--ssl-negotiation mimic`, which has `pgpi` do whatever the connecting client did.
+The `--server-sslnegotiation direct` option tells `pgpi` to initiate a TLS connection to the server immediately, without first sending an SSLRequest message (this is a [new feature in Postgres 17+](https://www.postgresql.org/docs/current/release-17.html#RELEASE-17-LIBPQ) and saves a network round-trip). Specifying `--server-sslnegotiation postgres` has the opposite effect. The default is `--server-sslnegotiation mimic`, which has `pgpi` do whatever the connecting client did.
 
-The `--no-channel-binding` option removes support for channel binding (SCRAM-SHA-256-PLUS) when authenticating with the server via `--override-auth`.
+The `--no-server-channel-binding` option removes support for channel binding (SCRAM-SHA-256-PLUS) when authenticating with the server via `--override-auth`.
 
-The `--cert-sig` option specifies the encryption type of the self-signed certificate `pgpi` presents to connecting clients. The default is `--cert-sig rsa`, but `--cert-sig ecdsa` is also supported.
+The `--client-cert-sig` option specifies the encryption type of the self-signed certificate `pgpi` presents to connecting clients. The default is `--client-cert-sig rsa`, but `--client-cert-sig ecdsa` is also supported.
 
 If the `--send-chunking byte` option is given, all traffic is forwarded one single byte at a time in both directions. This is extremely inefficient, but it can smoke out software that doesn’t correctly buffer its TCP/TLS input. The default is `--send-chunking whole`, which forwards as many complete Postgres messages as are available when new data are received.
 
@@ -283,7 +283,7 @@ The `--quit-on-hangup` option causes the script to exit when the first Postgres 
 
 If you prefer to use Wireshark to analyze your Postgres traffic, you can use the `--client-sslkeylogfile` and/or `--server-sslkeylogfile` options to specify files that will have TLS keys (for either side of the connection) appended for use in decryption.
 
-You could also simply use an unencrypted connection on the client side. Use the `--deny-client-ssl` option to have `pgpi` tell connecting clients that TLS is not supported (while still supporting TLS for the onward connection to the server).
+You could also simply use an unencrypted connection on the client side. Use the `--client-deny-ssl` option to have `pgpi` tell connecting clients that TLS is not supported (while still supporting TLS for the onward connection to the server).
 
 If using Wireshark, you might also want to specify `--log-forwarded none`.
 
@@ -300,8 +300,8 @@ If using Wireshark, you might also want to specify `--log-forwarded none`.
 To tun tests, clone this repo and from the root directory:
 
 * Get the `pg` gem: `gem install pg`
-* Ensure Docker is installed and running
-* Create a file `tests/.env` containing `DATABASE_URL="postgresql://..."` which must point to a database with a PKI-signed SSL cert (e.g. on Neon)
+* Ensure Docker and OpenSSL are available
+* Optionally: create a file `tests/.env` containing `DATABASE_URL="postgresql://..."` which must point to a database with a PKI-signed SSL cert (e.g. on Neon)
 * Run `tests/test.sh`
 * Or to see OpenSSL, Docker and pgpi output alongside test results: `tests/test.sh --verbose`
 

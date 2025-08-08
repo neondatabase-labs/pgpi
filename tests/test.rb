@@ -337,7 +337,7 @@ Dir.mktmpdir('pgpi-tests') do |tmpdir|
       end
 
       do_test("--override-auth with no channel binding") do
-        result, pgpi_log = with_pgpi("--override-auth --no-server-channel-binding") do
+        result, pgpi_log = with_pgpi("--override-auth --server-channel-binding=disable") do
           do_test_query('postgresql://frodo:friend@localhost:54321/frodo?sslmode=require&channel_binding=disable')
         end
         result && contains(pgpi_log, 'script -> server: "p" = SASLInitialResponse "\x00\x00\x00\x4b" = 75 bytes' + "\n" +

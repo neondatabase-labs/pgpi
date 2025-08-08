@@ -894,7 +894,7 @@ loop do
           mechanism = (authenticators.keys & offered_mechanisms).first
           raise "no supported SASL mechanism: support #{authenticators.keys.inspect}, offered #{offered_mechanisms.inspect}" if mechanism.nil?
 
-          auth = authenticators[mechanism].new(username: "*", password: pwd, ssl_cert: options[:channel_binding] ? server_sock.peer_cert : nil)
+          auth = authenticators[mechanism].new(username: "*", password: pwd, ssl_cert: options[:channel_binding] == 'disable' ? nil : server_sock.peer_cert)
           client_initial_msg = auth.process(nil)
           scram_msg = bin_str("#{mechanism}\x00#{[client_initial_msg.length].pack("N")}#{client_initial_msg}")
           pg_send(server_sock, [pg_msg("p", scram_msg)], :client) { |str| puts script_to_server(str) }

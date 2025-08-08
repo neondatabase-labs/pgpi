@@ -44,7 +44,7 @@ options = { # set defaults
   server_sslkeylogfile: nil,
   bw: nil,
   quit_on_hangup: false,
-  channel_binding: true,
+  channel_binding: 'prefer',
 }
 
 OptionParser.new do |opts|
@@ -57,7 +57,7 @@ OptionParser.new do |opts|
           "Port on which to listen for client connection (default: #{options[:listen_port]})") { |v| options[:listen_port] = v.to_i }
   opts.on("--server-connect-port nnnn", /\d{1,5}/,
           "Port on which to connect to server (default: #{options[:connect_port]})") { |v| options[:connect_port] = v.to_i }
-  opts.on("--server-sslmode disabled|prefer|require|verify-ca|verify-full", ['disabled', 'prefer', 'require', 'verify-ca', 'verify-full'],
+  opts.on("--server-sslmode disable|prefer|require|verify-ca|verify-full", ['disable', 'prefer', 'require', 'verify-ca', 'verify-full'],
           "SSL mode for connection to server (default: #{options[:sslmode]})") { |v| options[:sslmode] = v }
   opts.on("--server-sslrootcert system|/path/to/cert",
           "Root/CA certificate for connection to server (default: #{options[:sslrootcert] || 'none'})") { |v| options[:sslrootcert] = v }
@@ -65,8 +65,8 @@ OptionParser.new do |opts|
           "SSL negotiation style: mimic client, direct or traditional Postgres (default: #{options[:ssl_negotiation]})") { |v| options[:ssl_negotiation] = v }
   opts.on("--[no-]override-auth",
           "Require password auth from client, do SASL/MD5/password auth with server (default: #{options[:force_password]})") { |v| options[:force_password] = v }
-  opts.on("--[no-]server-channel-binding",
-          "Enable channel binding for SASL connection to server with --override-auth (default: #{options[:channel_binding]})") { |v| options[:channel_binding] = v }
+  opts.on("--server-channel-binding disable|prefer|require", ['disable', 'prefer', 'require'],
+          "Channel binding policy for SASL connection to server with --override-auth (default: #{options[:channel_binding]})") { |v| options[:channel_binding] = v }
   opts.on("--[no-]redact-passwords",
           "Redact password messages in logs (default: #{options[:redact_passwords]})") { |v| options[:redact_passwords] = v }
   opts.on("--send-chunking whole|byte", ["whole", "byte"],
@@ -790,7 +790,7 @@ loop do
 
     server_sock = TCPSocket.new(server_name, options[:connect_port])
 
-    if options[:sslmode] != 'disabled'
+    if options[:sslmode] != 'disable'
       server_direct_ssl = options[:ssl_negotiation] == "direct" || (options[:ssl_negotiation] == "mimic" && client_direct_ssl)
 
       unless server_direct_ssl
@@ -887,8 +887,8 @@ loop do
             exit 1
           end
           authenticators = { # highest preference first
-            **(options[:channel_binding] ? {"SCRAM-SHA-256-PLUS" => ScramSHA256PlusAuthenticator} : {}),
-            "SCRAM-SHA-256" => ScramSHA256Authenticator,
+            **(options[:channel_binding] != 'disable' ? {"SCRAM-SHA-256-PLUS" => ScramSHA256PlusAuthenticator} : {}),
+            **(options[:channel_binding] != 'require' ? {"SCRAM-SHA-256" => ScramSHA256Authenticator} : {}),
           }
           offered_mechanisms = auth_msg[9..].split("\x00")
           mechanism = (authenticators.keys & offered_mechanisms).first

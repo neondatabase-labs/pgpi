@@ -155,7 +155,7 @@ Usage: pgpi [options]
         --server-delete-suffix bc.de   Delete a suffix from server hostname provided by client (default: .local.neon.build)
         --client-listen-port nnnn           Port on which to listen for client connection (default: 5432)
         --server-connect-port nnnn          Port on which to connect to server (default: 5432)
-        --server-sslmode disabled|prefer|require|verify-ca|verify-full
+        --server-sslmode disable|prefer|require|verify-ca|verify-full
                                      SSL mode for connection to server (default: prefer)
         --server-sslrootcert system|/path/to/cert
                                      Root/CA certificate for connection to server (default: none)
@@ -238,7 +238,7 @@ If your Postgres client is using `channel_binding=require`, you’ll need to:
 
 ### Security: connection to server
 
-`pgpi` has `--server-sslmode` and `--server-sslrootcert` options that work the same as those options to `libpq`. To secure the onward connection to a server with an SSL certificate signed by a public CA, specify `--server-sslrootcert=system`.
+`pgpi` has `--server-sslmode` and `--server-sslrootcert` options that work the same as the `sslmode` and `sslrootcert` options to `libpq`. To secure the onward connection to a server with an SSL certificate signed by a public CA, specify `--server-sslrootcert=system`.
 
 
 ### Logging
@@ -270,7 +270,7 @@ Use `--bw` to suppress colours in TTY output (or `--no-bw` to force colours even
 
 The `--server-sslnegotiation direct` option tells `pgpi` to initiate a TLS connection to the server immediately, without first sending an SSLRequest message (this is a [new feature in Postgres 17+](https://www.postgresql.org/docs/current/release-17.html#RELEASE-17-LIBPQ) and saves a network round-trip). Specifying `--server-sslnegotiation postgres` has the opposite effect. The default is `--server-sslnegotiation mimic`, which has `pgpi` do whatever the connecting client did.
 
-The `--no-server-channel-binding` option removes support for channel binding (SCRAM-SHA-256-PLUS) when authenticating with the server via `--override-auth`.
+The `--server-channel-binding` option determines the approach to channel binding (SCRAM-SHA-256-PLUS) when authenticating with the server via `--override-auth`. Like the related libpq option, it may be set to `disable`, `prefer` (the default) or `require`.
 
 The `--client-cert-sig` option specifies the encryption type of the self-signed certificate `pgpi` presents to connecting clients. The default is `--client-cert-sig rsa`, but `--client-cert-sig ecdsa` is also supported.
 
@@ -299,11 +299,10 @@ If using Wireshark, you might also want to specify `--log-forwarded none`.
 
 To tun tests, clone this repo and from the root directory:
 
-* Get the `pg` gem: `gem install pg`
 * Ensure Docker and OpenSSL are available
+* Get the `pg` gem: `gem install pg`
 * Optionally: create a file `tests/.env` containing `DATABASE_URL="postgresql://..."` which must point to a database with a PKI-signed SSL cert (e.g. on Neon)
-* Run `tests/test.sh`
-* Or to see OpenSSL, Docker and pgpi output alongside test results: `tests/test.sh --verbose`
+* Run `tests/test.sh` — or to see OpenSSL, Docker and pgpi output alongside test results, `tests/test.sh --verbose`
 
 
 ### License

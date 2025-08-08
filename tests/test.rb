@@ -135,7 +135,6 @@ Dir.mktmpdir('pgpi-tests') do |tmpdir|
         result
       end
 
-
       do_test("strip .local.neon.build") do
         result, _ = with_pgpi do
           do_test_query('postgresql://frodo:friend@localhost.local.neon.build:54321/frodo?sslmode=require&channel_binding=disable')
@@ -164,8 +163,8 @@ Dir.mktmpdir('pgpi-tests') do |tmpdir|
         result
       end
 
-      do_test("connecting to server with --server-sslmode=disabled succeeds with no SSL") do
-        result, pgpi_log = with_pgpi("--server-sslmode=disabled") do
+      do_test("connecting to server with --server-sslmode=disable succeeds with no SSL") do
+        result, pgpi_log = with_pgpi("--server-sslmode=disable") do
           do_test_query('postgresql://frodo:friend@localhost:54321/frodo')
         end
         result && contains(pgpi_log, "connection established with server", false)  # part of the TLS connection message

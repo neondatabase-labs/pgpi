@@ -26,7 +26,7 @@ Note that `sslmode=require` is quite widely used but by itself [provides no secu
 On macOS, install `pgpi` via Homebrew tap:
 
 ```bash
-% brew install neondatabase-labs/tools/pgpi  # TODO: not yet implemented
+% brew install neondatabase-labs/pgpi/pgpi
 ```
 
 Or on any platform, simply download [the `pgpi` script](pgpi) and run it using Ruby 3.3 or higher (earlier Ruby versions may support some but not all features). It has no dependencies beyond the Ruby standard library.

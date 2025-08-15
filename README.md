@@ -245,7 +245,7 @@ If your Postgres client is using `channel_binding=require`, you’ll need to:
 
 ### Security: connection to server
 
-`pgpi` has `--server-sslmode` and `--server-sslrootcert` options that work the same as the `sslmode` and `sslrootcert` options to `libpq`. To secure the onward connection to a server with an SSL certificate signed by a public CA, specify `--server-sslrootcert=system`.
+`pgpi` has `--server-sslmode` and `--server-sslrootcert` options that work the same as the `sslmode` and `sslrootcert` options to `libpq`. To secure the onward connection to a server that has an SSL certificate signed by a public CA, specify `--server-sslrootcert=system`.
 
 
 ### Logging
@@ -277,7 +277,7 @@ Use `--bw` to suppress colours in TTY output (or `--no-bw` to force colours even
 
 The `--server-sslnegotiation direct` option tells `pgpi` to initiate a TLS connection to the server immediately, without first sending an SSLRequest message (this is a [new feature in Postgres 17+](https://www.postgresql.org/docs/current/release-17.html#RELEASE-17-LIBPQ) and saves a network round-trip). Specifying `--server-sslnegotiation postgres` has the opposite effect. The default is `--server-sslnegotiation mimic`, which has `pgpi` do whatever the connecting client did.
 
-The `--server-channel-binding` option determines the approach to channel binding (SCRAM-SHA-256-PLUS) when authenticating with the server via `--override-auth`. Like the related libpq option, it may be set to `disable`, `prefer` (the default) or `require`.
+The `--server-channel-binding` option determines the approach to channel binding (SCRAM-SHA-256-PLUS) when authenticating with the server via `--override-auth`. Like the related libpq option, it may be set to `disable`, `prefer` (which is the default) or `require`.
 
 The `--client-cert-sig` option specifies the encryption type of the self-signed certificate `pgpi` presents to connecting clients. The default is `--client-cert-sig rsa`, but `--client-cert-sig ecdsa` is also supported.
 

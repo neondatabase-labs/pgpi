@@ -951,7 +951,6 @@ loop do
   ensure
     puts "connection end", ""
     client_sock.close unless client_sock.nil?
-    #server.close unless server.nil?
     thread.kill unless thread.nil?
 
     exit if options[:quit_on_hangup]

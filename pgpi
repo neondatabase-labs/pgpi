@@ -833,7 +833,7 @@ loop do
         puts server_sock.peer_cert.to_text, server_sock.peer_cert.to_pem if options[:log_certs]
 
       elsif server_speaks_ssl == "N"
-        raise 'server does not support SSL' if options[:connect_sslmode] != 'prefer'
+        raise 'server does not support SSL' if options[:sslmode] != 'prefer'
         puts "continuing without encryption"
 
       else

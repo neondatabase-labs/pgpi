@@ -40,7 +40,7 @@ Dir.mktmpdir('pgpi-tests') do |tmpdir|
     end
   end
 
-  def with_postgres(auth_method = 'scram-sha-256', port = 54320, extra = '')
+  def with_postgres(auth_method = 'scram-sha-256', port = 54320, extra = '', ssl = 'on')
     puts ">> Starting Docker Postgres (auth: #{auth_method}, port: #{port}) ..."
     docker_pid = spawn("docker run --rm --name pgpi-postgres-test \
       -p #{port}:5432 \
@@ -50,7 +50,7 @@ Dir.mktmpdir('pgpi-tests') do |tmpdir|
       #{auth_method == 'md5' ? '-e POSTGRES_INITDB_ARGS="--auth-local=md5"' : ''} \
       -v #{TMPDIR}:/etc/ssl/pg \
       postgres:17 \
-      -c ssl=on \
+      -c ssl=#{ssl} \
       -c ssl_cert_file=/etc/ssl/pg/client.pem \
       -c ssl_key_file=/etc/ssl/pg/client.key \
       #{extra}", **SPAWN_OPTS)
@@ -523,6 +523,17 @@ Dir.mktmpdir('pgpi-tests') do |tmpdir|
         results.cmd_status == "INSERT 0 3"
       end
 
+    end
+
+    # non-SSL server connection
+
+    with_postgres('scram-sha-256', 54320, '', 'off') do
+      do_test("basic connection where server does not offer SSL") do
+        result, pgpi_log = with_pgpi do
+          do_test_query('postgresql://frodo:friend@localhost:54321/frodo?sslmode=require&channel_binding=disable')
+        end
+        result && contains(pgpi_log, 'continuing without encryption')
+      end
     end
 
     # additional --override-auth tests with different server auth configs

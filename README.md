@@ -1,45 +1,45 @@
-![pgpi logo](pgpi.svg)
+![Elephantshark logo](logo.svg)
 
-# pgpi: Postgres Private Investigator
+# Elephantshark
 
-**`pgpi` helps monitor, understand and troubleshoot Postgres network traffic: Postgres clients, drivers and ORMs talking to Postgres servers, proxies and poolers** (also: standby servers talking to their primaries and subscriber servers talking to their publishers).
+**Elephantshark helps monitor, understand and troubleshoot Postgres network traffic: Postgres clients, drivers and ORMs talking to Postgres servers, proxies and poolers** (also: standby servers talking to their primaries and subscriber servers talking to their publishers).
 
-`pgpi` sits between the two parties in a PostgreSQL-protocol exchange, forwarding messages in both directions while parsing and logging them.
+Elephantshark sits between the two parties in a PostgreSQL-protocol exchange, forwarding messages in both directions while parsing and logging them.
 
 ### Why not just use Wireshark? 
 
 Ordinarily [Wireshark](https://www.wireshark.org/) is great for this kind of thing, but using Wireshark is difficult if a connection is SSL/TLS-encrypted. [`SSLKEYLOGFILE`](https://wiki.wireshark.org/TLS#tls-decryption) support was [recently merged into libpq](https://www.postgresql.org/message-id/flat/CAOYmi%2B%3D5GyBKpu7bU4D_xkAnYJTj%3DrMzGaUvHO99-DpNG_YKcw%40mail.gmail.com#afc7fbd9fb2d13959cd97acae8ac8532), but it won’t be available in a release version for some time. And not all Postgres connections use libpq.
 
-To get round this, `pgpi` decrypts and re-encrypts a Postgres connection. It then logs and annotates the messages passing through. Or if you prefer to use Wireshark, `pgpi` can enable that by writing keys to an `SSLKEYLOGFILE` instead.
+To get round this, Elephantshark decrypts and re-encrypts a Postgres connection. It then logs and annotates the messages passing through. Or if you prefer to use Wireshark, Elephantshark can enable that by writing keys to an `SSLKEYLOGFILE` instead.
 
 ### Postgres and MITM attacks
 
-If your connection goes over a public network and you can use `pgpi` without changing any connection security options, you have an urgent security problem: you’re vulnerable to [MITM attacks](https://en.wikipedia.org/wiki/Man-in-the-middle_attack). `pgpi` isn’t the cause of the problem, but it can help show it up.
+If your connection goes over a public network and you can use Elephantshark without changing any connection security options, you have an urgent security problem: you’re vulnerable to [MITM attacks](https://en.wikipedia.org/wiki/Man-in-the-middle_attack). Elephantshark isn’t the cause of the problem, but it can help show it up.
 
 A fully-secure Postgres connection requires at least one of these parameters on the client: `channel_binding=require`, `sslrootcert=system`, `sslmode=verify-full`, or (when issuing certificates via your own certificate authority) `sslmode=verify-ca`. Non-libpq clients and drivers may have other ways to specify these features.
 
 Note that `sslmode=require` is quite widely used but by itself [provides no security against MITM attacks](https://neon.com/blog/postgres-needs-better-connection-security-defaults), because it does nothing to check who’s on the other end of a connection.
 
 
-## Get started with `pgpi`
+## Get started with Elephantshark
 
-On macOS, install `pgpi` via Homebrew tap:
+On macOS, install Elephantshark via Homebrew tap:
 
 ```bash
-% brew install neondatabase-labs/pgpi/pgpi
+% brew install neondatabase-labs/elephantshark/elephantshark
 ```
 
-Or on any platform, simply download [the `pgpi` script](pgpi) and run it using Ruby 3.3 or higher (earlier Ruby versions may support some but not all features). It has no dependencies beyond the Ruby standard library.
+Or on any platform, simply download [the `elephantshark` script](elephantshark) and run it using Ruby 3.3 or higher (earlier Ruby versions may support some but not all features). It has no dependencies beyond the Ruby standard library.
 
 
 ## Example session
 
 ```bash
-% pgpi
+% elephantshark
 listening ...
 ```
 
-In a second terminal, connect to and query a Neon Postgres database via `pgpi` by (1) appending `.local.neon.build` to the host name and (2) changing `channel_binding=require` to `channel_binding=disable`:
+In a second terminal, connect to and query a Neon Postgres database via Elephantshark by (1) appending `.local.neon.build` to the host name and (2) changing `channel_binding=require` to `channel_binding=disable`:
 
 ```bash
 % psql 'postgresql://neondb_owner:fake_password@ep-crimson-sound-a8nnh11s.eastus2.azure.neon.tech.local.neon.build/neondb?sslmode=require&channel_binding=disable'
@@ -60,7 +60,7 @@ neondb=> \q
 Back in the first terminal, see what bytes got exchanged:
 
 ```text
-% ./pgpi
+% elephantshark
 listening ...
 connected at t0 = 2025-07-04 14:28:59 +0100
 client -> script: "\x00\x00\x00\x08\x04\xd2\x16\x2f" = SSLRequest
@@ -143,18 +143,18 @@ listening ...
 
 ## Options
 
-`pgpi --help` lists available options.
+`elephantshark --help` lists available options.
 
 ```text
-% pgpi --help
-pgpi -- Postgres Private Investigator
-https://github.com/neondatabase-labs/pgpi ++ Copyright 2025 Databricks, Inc. ++ License: Apache 2.0
+% elephantshark --help
+Elephantshark
+https://github.com/neondatabase-labs/elephantshark ++ Copyright 2025 Databricks, Inc. ++ License: Apache 2.0
 
 Usage:
-pgpi [options]
+elephantshark [options]
 
---client-... options affect the connection to pgpi from the client
---server-... options affect the onward connection from pgpi to the server
+--client-... options affect the connection from the client to Elephantshark
+--server-... options affect the onward connection from Elephantshark to the server
 
         --server-host a.b.cd         Use a fixed Postgres server hostname (default: via SNI, or 'localhost')
         --server-delete-suffix .b.cd Delete a suffix from server hostname provided by client (default: .local.neon.build)
@@ -193,35 +193,35 @@ What are these options for?
 
 ### Getting between your Postgres client and server
 
-#### Remote Postgres + local `pgpi` and client
+#### Remote Postgres, but local Elephantshark and client
 
-In many cases you’ll probably run your Postgres client and `pgpi` on the same machine, with the server on a different machine, as in the example above.
+In many cases you’ll probably run your Postgres client and Elephantshark on the same machine, with the server on a different machine, as in the example above.
 
-When you connect your Postgres client via `pgpi` over TLS, `pgpi` uses [SNI](https://en.wikipedia.org/wiki/Server_Name_Indication) to find out what server hostname you gave the client. `pgpi` tries to forward the connection on to that same hostname, except that it first strips off the suffix `.local.neon.build` if present.
+When you connect your Postgres client via Elephantshark over TLS, Elephantshark uses [SNI](https://en.wikipedia.org/wiki/Server_Name_Indication) to find out what server hostname you gave the client. Elephantshark tries to forward the connection on to that same hostname, except that it first strips off the suffix `.local.neon.build` if present.
 
 > `local.neon.build` is set up such that every possible subdomain — `*.local.neon.build`, `*.*.local.neon.build`, etc. — resolves to your local machine, `127.0.0.1`. It's similar to services such as [localtest.me](https://github.com/localtest-dot-me/localtest-dot-me.github.com?tab=readme-ov-file).
 
-In the example, `ep-crimson-sound-a8nnh11s.eastus2.azure.neon.tech.local.neon.build` is just an alias for your local machine, where `pgpi` is running. `pgpi` then turns that hostname back into the real hostname, `ep-crimson-sound-a8nnh11s.eastus2.azure.neon.tech`, for the onward connection.
+In the example, `ep-crimson-sound-a8nnh11s.eastus2.azure.neon.tech.local.neon.build` is just an alias for your local machine, where Elephantshark is running. Elephantshark then turns that hostname back into the real hostname, `ep-crimson-sound-a8nnh11s.eastus2.azure.neon.tech`, for the onward connection.
 
 It’s also possible to:
 
-* Configure `pgpi` to strip a different domain suffix using the option `--server-delete-suffix .abc.xyz`.
+* Configure Elephantshark to strip a different domain suffix using the option `--server-delete-suffix .abc.xyz`.
 
 * Specify a fixed server hostname, instead of getting it via SNI from the client, using the `--server-host db.blah.xyz` option. This is useful especially for non-TLS client connections, where SNI is unavailable.
 
-#### Local Postgres, `pgpi` and client
+#### Everything local: Postgres, Elephantshark and client
 
-If the server is on the same machine as `pgpi` and the client, you’ll want `pgpi` and the Postgres server to listen for connections on different ports.
+If the server is on the same machine as Elephantshark and the client, you’ll want Elephantshark and the Postgres server to listen for connections on different ports.
 
-Use `pgpi`'s `--client-listen-port` and `--server-connect-port` options to achieve this. Both `--client-listen-port` and `--server-connect-port` default to the standard Postgres port, `5432`.
+Use Elephantshark's `--client-listen-port` and `--server-connect-port` options to achieve this. Both `--client-listen-port` and `--server-connect-port` default to the standard Postgres port, `5432`.
 
-So if your server is running on port `5432`, you might have `pgpi` listen on a non-standard port:
+So if your server is running on port `5432`, you might have Elephantshark listen on a non-standard port:
 
 ```bash
-pgpi --client-listen-port 5433
+elephantshark --client-listen-port 5433
 ```
 
-And then connect the client via `pgpi` on that non-standard port:
+And then connect the client via Elephantshark on that non-standard port:
 
 ```bash
 psql 'postgresql://me:mypassword@localhost:5433/mydb'
@@ -229,30 +229,30 @@ psql 'postgresql://me:mypassword@localhost:5433/mydb'
 
 ### Security: connection from client
 
-By default, `pgpi` generates a minimal, self-signed TLS certificate on the fly, and does nothing to interfere with the authentication process.
+By default, Elephantshark generates a minimal, self-signed TLS certificate on the fly, and does nothing to interfere with the authentication process.
 
 If your Postgres client is using `sslrootcert=system`, `sslmode=verify-full` or `sslmode=verify-ca` you’ll need to either:
 
 1. Downgrade that to `sslmode=require` or lower; or 
-2. Supply `pgpi` with a TLS certificate that’s trusted according to `sslrootcert`, plus the corresponding private key, using the `--client-ssl-cert` and `--client-ssl-key` options.
+2. Supply Elephantshark with a TLS certificate that’s trusted according to `sslrootcert`, plus the corresponding private key, using the `--client-ssl-cert` and `--client-ssl-key` options.
 
 If your Postgres client is using `channel_binding=require`, you’ll need to:
 
 1. Downgrade that to `channel_binding=disable`; or
-2. Downgrade to `channel_binding=prefer` _and_ use the `--override-auth` option to have `pgpi` perform authorization on the client’s behalf (cleartext, MD5 and SCRAM auth are supported, by requesting the client’s password in cleartext); or
-3. Supply `pgpi` with precisely the same certificate and private key the server is using, via the `--client-ssl-cert` and `--client-ssl-key` options.
+2. Downgrade to `channel_binding=prefer` _and_ use the `--override-auth` option to have Elephantshark perform authorization on the client’s behalf (cleartext, MD5 and SCRAM auth are supported, by requesting the client’s password in cleartext); or
+3. Supply Elephantshark with precisely the same certificate and private key the server is using, via the `--client-ssl-cert` and `--client-ssl-key` options.
 
 
 ### Security: connection to server
 
-`pgpi` has `--server-sslmode` and `--server-sslrootcert` options that work the same as the `sslmode` and `sslrootcert` options to `libpq`. To secure the onward connection to a server that has an SSL certificate signed by a public CA, specify `--server-sslrootcert=system`.
+Elephantshark has `--server-sslmode` and `--server-sslrootcert` options that work the same as the `sslmode` and `sslrootcert` options to `libpq`. To secure the onward connection to a server that has an SSL certificate signed by a public CA, specify `--server-sslrootcert=system`.
 
 
 ### Logging
 
-By default, `pgpi` logs and annotates all Postgres traffic that passes through. This behaviour can be specified explicitly as `--log-forwarded annotated`.
+By default, Elephantshark logs and annotates all Postgres traffic that passes through. This behaviour can be specified explicitly as `--log-forwarded annotated`.
 
-Alternatives are `--log-forwarded raw`, which logs the data without annotation (it just calls Ruby’s `inspect` on the binary string), or `--log-forwarded none`, which prevents most logging. You might use `--log-forwarded none` if you're using `pgpi` to enable the use of Wireshark, for example.
+Alternatives are `--log-forwarded raw`, which logs the data without annotation (it just calls Ruby’s `inspect` on the binary string), or `--log-forwarded none`, which prevents most logging. You might use `--log-forwarded none` if you're using Elephantshark to enable the use of Wireshark, for example.
 
 Example log line for `--log-forwarded annotated`:
 
@@ -275,11 +275,11 @@ Use `--bw` to suppress colours in TTY output (or `--no-bw` to force colours even
 
 ### Connection options
 
-The `--server-sslnegotiation direct` option tells `pgpi` to initiate a TLS connection to the server immediately, without first sending an SSLRequest message (this is a [new feature in Postgres 17+](https://www.postgresql.org/docs/current/release-17.html#RELEASE-17-LIBPQ) and saves a network round-trip). Specifying `--server-sslnegotiation postgres` has the opposite effect. The default is `--server-sslnegotiation mimic`, which has `pgpi` do whatever the connecting client did.
+The `--server-sslnegotiation direct` option tells Elephantshark to initiate a TLS connection to the server immediately, without first sending an SSLRequest message (this is a [new feature in Postgres 17+](https://www.postgresql.org/docs/current/release-17.html#RELEASE-17-LIBPQ) and saves a network round-trip). Specifying `--server-sslnegotiation postgres` has the opposite effect. The default is `--server-sslnegotiation mimic`, which has Elephantshark do whatever the connecting client did.
 
 The `--server-channel-binding` option determines the approach to channel binding (SCRAM-SHA-256-PLUS) when authenticating with the server via `--override-auth`. Like the related libpq option, it may be set to `disable`, `prefer` (which is the default) or `require`.
 
-The `--client-cert-sig` option specifies the encryption type of the self-signed certificate `pgpi` presents to connecting clients. The default is `--client-cert-sig rsa`, but `--client-cert-sig ecdsa` is also supported.
+The `--client-cert-sig` option specifies the encryption type of the self-signed certificate Elephantshark presents to connecting clients. The default is `--client-cert-sig rsa`, but `--client-cert-sig ecdsa` is also supported.
 
 If the `--send-chunking byte` option is given, all traffic is forwarded one single byte at a time in both directions. This is extremely inefficient, but it can smoke out software that doesn’t correctly buffer its TCP/TLS input. The default is `--send-chunking whole`, which forwards as many complete Postgres messages as are available when new data are received.
 
@@ -290,16 +290,17 @@ The `--quit-on-hangup` option causes the script to exit when the first Postgres 
 
 If you prefer to use Wireshark to analyze your Postgres traffic, you can use the `--client-sslkeylogfile` and/or `--server-sslkeylogfile` options to specify files that will have TLS keys (for either side of the connection) appended for use in decryption.
 
-You could also simply use an unencrypted connection on the client side. Use the `--client-deny-ssl` option to have `pgpi` tell connecting clients that TLS is not supported (while still supporting TLS for the onward connection to the server).
+You could also simply use an unencrypted connection on the client side. Use the `--client-deny-ssl` option to have Elephantshark tell connecting clients that TLS is not supported (while still supporting TLS for the onward connection to the server).
 
 If using Wireshark, you might also want to specify `--log-forwarded none`.
 
 
 ### Notes
 
-* Postgres options refer to SSL rather than TLS for historical reasons. `pgpi` options do so for consistency with Postgres. SSL and TLS can be regarded as wholly synonymous here.
+* Postgres options refer to SSL rather than TLS for historical reasons. Elephantshark options do so for consistency with Postgres. SSL and TLS can be regarded as wholly synonymous here.
 * When reading Postgres protocol messages, you’ll see that most are [TLV-encoded](https://en.wikipedia.org/wiki/Type%E2%80%93length%E2%80%93value): they begin with 1 byte for the message’s type and 4 bytes for its length. Note that the 4-byte length value _includes its own length_: for example, it takes the value `4` if no data follows. Length values elsewhere in the protocol typically _do not_ include their own length, however. There is also some apparent inconsistency in whether strings and lists of strings are null-terminated.
 * The Postgres protocol has some [helpful documentation](https://www.postgresql.org/docs/current/protocol.html).
+* [Elephant sharks](https://en.wikipedia.org/wiki/Australian_ghostshark) do exist, but the name and logo of this project are inspired primarily by the combination of [Slonik the Postgres elephant](https://wiki.postgresql.org/wiki/Logo) and [Wireshark](https://www.wireshark.org/).
 
 
 ### Tests
@@ -309,9 +310,9 @@ To tun tests, clone this repo and from the root directory:
 * Ensure Docker and OpenSSL are available
 * Get the `pg` gem: `gem install pg`
 * Optionally: create a file `tests/.env` containing `DATABASE_URL="postgresql://..."` which must point to a database with a PKI-signed SSL cert (e.g. on Neon)
-* Run `tests/test.sh` — or to see OpenSSL, Docker and pgpi output alongside test results, `tests/test.sh --verbose`
+* Run `tests/test.sh` — or to see OpenSSL, Docker and Elephantshark output alongside test results, `tests/test.sh --verbose`
 
 
 ### License
 
-`pgpi` is released under the [Apache-2.0 license](LICENSE).
+Elephantshark is released under the [Apache-2.0 license](LICENSE).

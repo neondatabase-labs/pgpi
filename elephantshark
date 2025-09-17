@@ -20,8 +20,8 @@ require "securerandom" # for cert generation
 require "net/imap" # for SASL/SCRAM auth
 require "digest" # for MD5 auth
 
-SCRIPT_NAME = "pgpi -- Postgres Private Investigator" # note: name must be valid as a certificate CN
-SCRIPT_INFO = "https://github.com/neondatabase-labs/pgpi ++ Copyright 2025 Databricks, Inc. ++ License: Apache 2.0"
+SCRIPT_NAME = "Elephantshark" # note: name must be valid as a certificate CN
+SCRIPT_INFO = "https://github.com/neondatabase-labs/elephantshark ++ Copyright 2025 Databricks, Inc. ++ License: Apache 2.0"
 
 options = { # set defaults
   target: nil,
@@ -48,7 +48,7 @@ options = { # set defaults
 }
 
 OptionParser.new do |opts|
-  opts.banner = "#{SCRIPT_NAME}\n#{SCRIPT_INFO}\n\nUsage:\npgpi [options]\n\n--client-... options affect the connection to pgpi from the client\n--server-... options affect the onward connection from pgpi to the server\n\n"
+  opts.banner = "#{SCRIPT_NAME}\n#{SCRIPT_INFO}\n\nUsage:\nelephantshark [options]\n\n--client-... options affect the connection from the client to Elephantshark\n--server-... options affect the onward connection from Elephantshark to the server\n\n"
   opts.on("--server-host a.b.cd",
           "Use a fixed Postgres server hostname (default: via SNI, or 'localhost')") { |v| options[:target] = v }
   opts.on("--server-delete-suffix .b.cd",

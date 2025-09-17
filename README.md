@@ -1,4 +1,4 @@
-![Elephantshark logo](logo.svg)
+<img src="logo.svg" width="297" height="262" alt="Elephantshark logo">
 
 # Elephantshark
 

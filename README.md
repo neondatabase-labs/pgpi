@@ -305,11 +305,10 @@ If using Wireshark, you might also want to specify `--log-forwarded none`.
 
 ### Tests
 
-To tun tests, clone this repo and from the root directory:
+To run the tests, ensure Ruby, Docker and OpenSSL are on your `PATH`. Then clone this repo and from the root directory:
 
-* Ensure Docker and OpenSSL are available
 * Get the `pg` gem: `gem install pg`
-* Optionally: create a file `tests/.env` containing `DATABASE_URL="postgresql://..."` which must point to a database with a PKI-signed SSL cert (e.g. on Neon)
+* Optionally, create a file `tests/.env` containing `DATABASE_URL="postgresql://..."` which must point to a database with a PKI-signed SSL cert (e.g. on Neon)
 * Run `tests/test.sh` — or to see OpenSSL, Docker and Elephantshark output alongside test results, `tests/test.sh --verbose`
 
 

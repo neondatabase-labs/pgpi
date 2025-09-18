@@ -1,8 +1,8 @@
 #!/usr/bin/env ruby
 # elephantshark --no-bw | ./logs-to-svg.rb > ~/Downloads/eslog.svg
 
-xmargin = 10
-ymargin = 5
+xmargin = 20
+ymargin = 10
 fontsize = 15
 lineheight = 1.4
 charwidth = 0.465 # for calculating svg width
@@ -17,7 +17,7 @@ ARGF.each do |raw|
   line = raw.chomp
     .gsub(/[<>"']/, { '<' => '&lt;', '>' => '&gt;', '"' => '&quot;', "'" => '&apos;' })
     .gsub(/\033\[(\d+)m(.*?)\033\[0m/, '<tspan class="c\1">\2</tspan>')
-  text << %{<text xml:space="preserve" x="#{xmargin}px" y="#{y}px">#{line}</text>}
+  text << %{<text xml:space="preserve" x="#{xmargin}px" y="#{y}px">#{line}</text>} unless line.empty?
 end
 
 puts %{<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 #{(2 * xmargin + w * fontsize * charwidth).ceil}px #{2 * ymargin + y}px">

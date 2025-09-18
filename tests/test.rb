@@ -129,7 +129,7 @@ Dir.mktmpdir('elephantshark-tests') do |tmpdir|
     with_postgres do
 
       do_test("basic connection") do
-        result, es_log = with_elephantshark do
+        result, _ = with_elephantshark do
           do_test_query('postgresql://frodo:friend@localhost:54321/frodo?sslmode=require&channel_binding=disable')
         end
         result
@@ -157,7 +157,7 @@ Dir.mktmpdir('elephantshark-tests') do |tmpdir|
       end
 
       do_test("switch the listening port") do
-        result, es_log = with_elephantshark('', 65432) do
+        result, _ = with_elephantshark('', 65432) do
           do_test_query('postgresql://frodo:friend@localhost:65432/frodo?sslmode=require&channel_binding=disable')
         end
         result

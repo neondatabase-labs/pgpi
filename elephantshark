@@ -932,6 +932,7 @@ loop do
         puts "^^ #{bytes_sent} bytes forwarded #{BYTE_WRITE ? 'one by one ' : ''}at +#{(t_now - t0).floor(2)}s, #{server_reader.buffer.length} bytes left in buffer" if log_proxied
       end
     end
+    thread.report_on_exception = false
     thread.abort_on_exception = true
 
     # pass messages from client to server
@@ -949,7 +950,7 @@ loop do
     puts "client hung up"
 
   ensure
-    puts "connection end", ""
+    puts "connection end", "" # empty string = extra newline
     client_sock.close unless client_sock.nil?
     thread.kill unless thread.nil?
 

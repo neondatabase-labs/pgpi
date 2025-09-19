@@ -158,6 +158,8 @@ elephantshark [options]
 
         --server-host a.b.cd         Use a fixed Postgres server hostname (default: via SNI, or 'localhost')
         --server-delete-suffix .b.cd Delete a suffix from server hostname provided by client (default: .local.neon.build)
+        --client-listen-ip ::1|0.0.0.0|etc.
+                                     IP on which to listen for client connection (default: 127.0.0.1)
         --client-listen-port nnnn    Port on which to listen for client connection (default: 5432)
         --server-connect-port nnnn   Port on which to connect to server (default: 5432)
         --server-sslmode disable|prefer|require|verify-ca|verify-full
@@ -274,6 +276,10 @@ Use `--bw` to suppress colours in TTY output (or `--no-bw` to force colours even
 
 
 ### Connection options
+
+The `--client-listen-port` and `--server-connect-port` options determine the ports on which Elephantshark listens and connects. As described above, they both default to `5432`.
+
+The `--client-listen-ip` option determines the IP address Elephantshark binds to when listening for a client connection. The default is `127.0.0.1` (i.e. `localhost` on IPv4). You could also specify, for example, `::1` (`localhost` on IPv6) or `0.0.0.0` or `::` (wildcard addresses on IPv4 and IPv6). Be sure that a local Postgres install is not listening on the same port. In particular, note that if Postgres is listening on `127.0.0.1` then Elephantshark will agree to listen on `0.0.0.0`, but connections to `127.0.0.1` will go to Postgres, not Elephantshark.
 
 The `--server-sslnegotiation direct` option tells Elephantshark to initiate a TLS connection to the server immediately, without first sending an SSLRequest message (this is a [new feature in Postgres 17+](https://www.postgresql.org/docs/current/release-17.html#RELEASE-17-LIBPQ) and saves a network round-trip). Specifying `--server-sslnegotiation postgres` has the opposite effect. The default is `--server-sslnegotiation mimic`, which has Elephantshark do whatever the connecting client did.
 

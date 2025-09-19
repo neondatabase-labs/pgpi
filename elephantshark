@@ -26,10 +26,11 @@ SCRIPT_INFO = "https://github.com/neondatabase-labs/elephantshark ++ Copyright 2
 options = { # set defaults
   target: nil,
   delete_host_suffix: ".local.neon.build",
+  listen_ip: "127.0.0.1",
   listen_port: 5432,
   connect_port: 5432,
   ssl_negotiation: "mimic",
-  sslmode: 'prefer',
+  sslmode: "prefer",
   sslrootcert: nil,
   force_password: false,
   redact_passwords: false,
@@ -44,7 +45,7 @@ options = { # set defaults
   server_sslkeylogfile: nil,
   bw: nil,
   quit_on_hangup: false,
-  channel_binding: 'prefer',
+  channel_binding: "prefer",
 }
 
 OptionParser.new do |opts|
@@ -53,6 +54,8 @@ OptionParser.new do |opts|
           "Use a fixed Postgres server hostname (default: via SNI, or 'localhost')") { |v| options[:target] = v }
   opts.on("--server-delete-suffix .b.cd",
           "Delete a suffix from server hostname provided by client (default: #{options[:delete_host_suffix]})") { |v| options[:delete_host_suffix] = v }
+  opts.on("--client-listen-ip ::1|0.0.0.0|etc.",
+          "IP on which to listen for client connection (default: #{options[:listen_ip]})") { |v| options[:listen_ip] = v }
   opts.on("--client-listen-port nnnn", /\d{1,5}/,
           "Port on which to listen for client connection (default: #{options[:listen_port]})") { |v| options[:listen_port] = v.to_i }
   opts.on("--server-connect-port nnnn", /\d{1,5}/,
@@ -689,7 +692,7 @@ ssl_request = [8, (1234 << 16) + 5679].pack("NN")
 class ClientEOFException < StandardError; end
 class ServerEOFException < StandardError; end
 
-server = TCPServer.new("0.0.0.0", options[:listen_port])
+server = TCPServer.new(options[:listen_ip], options[:listen_port])
 
 loop do
   begin
